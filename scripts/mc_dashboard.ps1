@@ -1,10 +1,9 @@
 # MC Node Dashboard - zero-dependency HttpListener dashboard for the MCServer laptop.
-#   GET  /          -> single-page dashboard (dark instrument console, Japanese, no CDN)
+#   GET  /          -> single-page dashboard (tactical telemetry console, no CDN)
 #   GET  /api/stats -> JSON snapshot (node + minecraft + log tail)
-# Listens on http://+:8787/ (LAN only - inbound is scoped by the
+# Listens on http://*:8787/ (LAN only - inbound is scoped by the
 # "MCServer Dashboard" firewall rule to 192.168.1.0/24).
 # Designed for scheduled task MCServer-Dashboard (SYSTEM / onstart / HIGHEST).
-# The outer loop never exits: every failure is caught, the listener is rebuilt.
 $ErrorActionPreference = 'Continue'
 $mcDir = 'C:\Users\motch\MCServer'
 $hwFile = Join-Path $mcDir 'hw_stats_hw.txt'
@@ -19,172 +18,209 @@ $script:html = @'
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ST-LAPTOP / MC Console</title>
+<title>ST-LAPTOP /// NODE TELEMETRY</title>
 <style>
 :root{
-  --bg:#0b0e13; --panel:#10141b; --panel2:#0d1117; --line:#1c2230; --line2:#242c3d;
-  --tx:#e8ecf3; --mut:#7d8798; --dim:#545e6e;
-  --ok:#34d399; --warn:#f5b23e; --crit:#ef5350;
+  --bg:#0a0a0a; --panel:#101010; --panel2:#0d0d0d; --line:#262626; --line2:#3a3a3a;
+  --fg:#eaeaea; --mut:#8a8a8a; --dim:#4a4a4a;
+  --red:#ff2a2a; --grn:#4af626;
   --mono:"Cascadia Code","Cascadia Mono",Consolas,"Courier New",monospace;
-  --sans:"Segoe UI Variable Text","Segoe UI","Yu Gothic UI","Hiragino Sans",system-ui,sans-serif;
+  --heavy:"Arial Black","Segoe UI Black","Helvetica Neue",Arial,sans-serif;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-html{-webkit-text-size-adjust:100%}
-body{background:var(--bg);color:var(--tx);font-family:var(--sans);min-height:100vh;
-  display:flex;flex-direction:column}
-.wrap{width:100%;max-width:1240px;margin:0 auto;padding:0 26px}
+body{background:var(--bg);color:var(--fg);font-family:var(--mono);min-height:100vh;overflow-x:hidden}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:90;
+  background:repeating-linear-gradient(0deg,rgba(255,255,255,.022) 0 1px,transparent 1px 3px)}
+::selection{background:var(--red);color:#fff}
+.wrap{max-width:1420px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
+.wrap>*{flex:0 0 auto}
+.wrap>.lsec{flex:1 1 auto}
 
-/* ---------- header ---------- */
-header{border-bottom:1px solid var(--line)}
-.hrow{display:flex;align-items:center;justify-content:space-between;height:64px;gap:16px}
-.brand .eyebrow{font-family:var(--mono);font-size:9.5px;letter-spacing:2.2px;color:var(--dim);text-transform:uppercase}
-.brand h1{font-size:14.5px;font-weight:600;letter-spacing:.2px;margin-top:3px}
-.brand h1 small{color:var(--mut);font-weight:400;font-size:12px;margin-left:8px}
-.hstat{display:flex;align-items:center;gap:14px}
-.state{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;
-  letter-spacing:.8px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:6px 13px;background:var(--panel)}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}
-.state.ok .dot{background:var(--ok);box-shadow:0 0 8px rgba(52,211,153,.45)}
-.state.ok{color:var(--ok);border-color:rgba(52,211,153,.35)}
-.state.warn .dot{background:var(--warn);box-shadow:0 0 8px rgba(245,178,62,.45)}
-.state.warn{color:var(--warn);border-color:rgba(245,178,62,.4)}
-.state.crit .dot{background:var(--crit);box-shadow:0 0 10px rgba(239,83,80,.5);animation:blink 1.6s ease-in-out infinite}
-.state.crit{color:var(--crit);border-color:rgba(239,83,80,.45)}
-@keyframes blink{50%{opacity:.35}}
-.clock{font-family:var(--mono);font-size:12px;color:var(--mut);letter-spacing:.5px;font-variant-numeric:tabular-nums}
+/* ---------- top bar ---------- */
+.bar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;
+  padding:7px 18px;border-bottom:2px solid var(--line);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--mut)}
+.bar b{color:var(--fg);font-weight:700}
+.bar .r{display:flex;gap:22px}
+.bar .r span::before{content:"+ ";color:var(--dim)}
 
-/* ---------- tiles ---------- */
-.tiles{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:22px 0 10px}
-.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px 12px;
-  display:flex;flex-direction:column;gap:8px;min-height:108px;transition:border-color .3s}
-.tile:hover{border-color:var(--line2)}
-.tile .lbl{font-size:10.5px;font-weight:600;letter-spacing:1.1px;color:var(--mut)}
-.tile .lbl .tgt{color:var(--dim);letter-spacing:.4px;font-weight:400}
-.tile .num{font-family:var(--mono);font-size:33px;font-weight:700;line-height:1;
-  letter-spacing:-.5px;font-variant-numeric:tabular-nums;margin-top:auto;color:var(--tx);
-  transition:color .4s}
-.tile .num .unit{font-size:13px;font-weight:400;color:var(--mut);letter-spacing:0;margin-left:4px}
-.tile[data-state="warn"] .num{color:var(--warn)}
-.tile[data-state="crit"] .num{color:var(--crit)}
-.tile.na .num{color:var(--dim);font-size:24px}
-.meter{height:3px;background:#171d29;border-radius:2px;overflow:hidden}
-.meter>span{display:block;height:100%;width:0%;background:var(--ok);border-radius:2px;transition:width .6s ease,background-color .4s}
-.meter>span.warn{background:var(--warn)}
-.meter>span.crit{background:var(--crit)}
-.tile .foot{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.3px;font-variant-numeric:tabular-nums;min-height:13px}
+/* ---------- hero ---------- */
+.hero{display:grid;grid-template-columns:1fr auto;gap:10px 30px;align-items:end;
+  padding:26px 18px 20px;border-bottom:2px solid var(--line);position:relative}
+.micro{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
+.micro b{color:var(--fg)}
+h1{font-family:var(--heavy);font-weight:900;font-size:clamp(2.3rem,5.6vw,4.4rem);
+  letter-spacing:-.035em;line-height:.92;text-transform:uppercase;margin:10px 0 8px;color:var(--fg)}
+h1.warn{color:var(--fg)}
+h1.crit{color:var(--red)}
+.herosub{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
+.herosub .ok{color:var(--grn)}
+.herosub .bad{color:var(--red)}
+.hright{text-align:right}
+.hright .lbl{font-size:10px;letter-spacing:.18em;color:var(--mut);text-transform:uppercase;margin-bottom:2px}
+.tpsnum{font-family:var(--mono);font-weight:700;font-size:clamp(3rem,7vw,5rem);line-height:.9;
+  letter-spacing:-.04em;font-variant-numeric:tabular-nums}
+.tpsnum small{font-size:.32em;color:var(--mut);font-weight:400;letter-spacing:.06em}
+.tpsnum.warn{color:var(--warn0,#eaeaea)}
+.tpsnum.crit{color:var(--red)}
+.hazard{display:none;height:8px;background:repeating-linear-gradient(-45deg,var(--red) 0 12px,#0a0a0a 12px 24px)}
+.hazard.on{display:block}
+.hazard.stripes-only{display:block;background:repeating-linear-gradient(-45deg,#1c1c1c 0 12px,#0a0a0a 12px 24px)}
+
+/* ---------- metric grid ---------- */
+.gridlabel{display:flex;justify-content:space-between;padding:8px 18px 6px;font-size:10px;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+.gridlabel b{color:var(--mut)}
+.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--line);
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.cell{background:var(--panel);padding:12px 14px 11px;min-height:118px;display:flex;flex-direction:column}
+.cell .lbl{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut)}
+.cell .lbl i{font-style:normal;color:var(--dim)}
+.cell .num{font-family:var(--mono);font-size:31px;font-weight:700;line-height:1;
+  font-variant-numeric:tabular-nums;margin-top:auto;color:var(--fg);transition:color .3s}
+.cell .num small{font-size:.36em;font-weight:400;color:var(--mut);letter-spacing:.04em}
+.cell[data-state="warn"] .num{color:var(--red);opacity:.62}
+.cell[data-state="crit"] .num{color:var(--red)}
+.cell.na .num{color:var(--dim);font-size:20px;letter-spacing:.06em}
+.meter{height:4px;background:#1b1b1b;margin-top:9px;position:relative}
+.meter>span{position:absolute;inset:0 auto 0 0;width:0%;background:#5e5e5e;transition:width .6s ease,background-color .3s}
+.meter>span.warn{background:var(--red);opacity:.55}
+.meter>span.crit{background:var(--red)}
+.cell .foot{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-top:7px;min-height:12px;font-variant-numeric:tabular-nums}
 
 /* ---------- strip ---------- */
-.strip{display:grid;grid-template-columns:repeat(4,1fr);background:var(--panel);
-  border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
-.si{padding:11px 16px;border-left:1px solid var(--line)}
-.si:first-child{border-left:none}
-.si .lbl{font-size:10px;font-weight:600;letter-spacing:1.1px;color:var(--mut);margin-bottom:5px}
-.si .val{font-family:var(--mono);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--tx)}
-.si .val.na{color:var(--dim)}
+.strip{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+  border-bottom:1px solid var(--line)}
+.si{background:var(--panel);padding:9px 14px}
+.si .lbl{font-size:9px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;margin-bottom:3px}
+.si .lbl::before{content:"+ ";color:var(--line2)}
+.si .val{font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.02em}
+.si .val.na{color:var(--dim);font-weight:400}
 
 /* ---------- log ---------- */
-.console{background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:10px}
-.chead{display:flex;justify-content:space-between;align-items:center;padding:9px 16px;border-bottom:1px solid var(--line)}
-.chead .t{font-family:var(--mono);font-size:10.5px;letter-spacing:1.4px;color:var(--mut);text-transform:uppercase}
-.chead .h{font-family:var(--mono);font-size:10px;color:var(--dim)}
-pre#log{font-family:var(--mono);font-size:11.3px;line-height:1.62;color:#9aa5b5;height:264px;
-  overflow:auto;padding:11px 16px;white-space:pre-wrap;word-break:break-all}
-pre#log .er{color:var(--crit)}
-pre#log .wn{color:var(--warn)}
+.lsec{border-bottom:1px solid var(--line);display:flex;flex-direction:column}
+.lhead{display:flex;justify-content:space-between;padding:8px 18px;font-size:10px;
+  letter-spacing:.16em;text-transform:uppercase;color:var(--mut)}
+.lhead .l b{color:var(--fg)}
+.lhead .l::before{content:">>> ";color:var(--red)}
+pre#log{font-size:11px;line-height:1.62;color:#9c9c9c;background:var(--panel2);
+  padding:10px 16px;min-height:180px;max-height:320px;flex:1 1 auto;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:0}
 pre#log .ts{color:var(--dim)}
+pre#log .er{color:var(--red)}
+pre#log .wn{color:var(--red);opacity:.55}
 
 /* ---------- footer ---------- */
-footer{margin-top:auto;padding:14px 0 18px}
-footer .fi{border-top:1px solid var(--line);padding-top:12px;font-family:var(--mono);
-  font-size:10px;color:var(--dim);text-align:center;letter-spacing:.4px}
+footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:9px 18px;
+  font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+footer b{color:var(--mut)}
+footer .c::before{content:"© ";color:var(--line2)}
+footer .r::before{content:"® ";color:var(--line2)}
 
-@media (max-width:1100px){.tiles{grid-template-columns:repeat(3,1fr)}}
-@media (max-width:820px){.strip{grid-template-columns:repeat(2,1fr)}.si:nth-child(3){border-left:none;border-top:1px solid var(--line)}.si:nth-child(4){border-top:1px solid var(--line)}}
-@media (max-width:620px){.tiles{grid-template-columns:repeat(2,1fr)}.hrow{height:auto;padding:12px 0;flex-wrap:wrap}.clock{display:none}}
+@media (max-width:1150px){.grid{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:680px){.grid{grid-template-columns:repeat(2,1fr)}.hero{grid-template-columns:1fr}.hright{text-align:left}}
 </style>
 </head>
 <body>
-<header>
-  <div class="wrap hrow">
-    <div class="brand">
-      <div class="eyebrow">HwTab Console</div>
-      <h1>ST-LAPTOP<small>Minecraft 1.21.1 / NeoForge</small></h1>
-    </div>
-    <div class="hstat">
-      <span class="clock" id="clock">--:--:--</span>
-      <span class="state" id="overall"><i class="dot"></i><span id="overallTx">接続中</span></span>
-    </div>
+<div class="wrap">
+  <div class="bar">
+    <span><b>HWTAB</b> /// NODE TELEMETRY</span>
+    <span class="r">
+      <span>UNIT / D-01</span>
+      <span>REV 2.6.0</span>
+      <span>LAN / 192.168.1.0/24</span>
+      <span id="clock">--:--:--</span>
+    </span>
   </div>
-</header>
 
-<main class="wrap">
-  <div class="tiles">
-    <div class="tile na" id="t-tps">
-      <div class="lbl">TPS <span class="tgt">/ 20.0</span></div>
-      <div class="num" id="tps">n/a</div>
-      <div class="meter"><span id="tpsBar"></span></div>
-      <div class="foot" id="tpsFoot">hwtab 再起動後に表示</div>
+  <section class="hero">
+    <div>
+      <div class="micro">[ NODE: <b>ST-LAPTOP</b> ] MINECRAFT 1.21.1 /// NEOFORGE 21.1.234 /// SUPERFLAT</div>
+      <h1 id="heroState">LINKING</h1>
+      <div class="herosub" id="heroSub">ACQUIRING TELEMETRY FEED /// POLL 3S</div>
     </div>
-    <div class="tile na" id="t-mspt">
-      <div class="lbl">MSPT</div>
+    <div class="hright">
+      <div class="lbl">[ TICK RATE ]</div>
+      <div class="tpsnum" id="tpsHero">--<small>/20 TPS</small></div>
+      <div class="micro" id="tpsFoot" style="margin-top:6px;color:var(--dim)">HWTAB MOD NOT LOADED</div>
+    </div>
+  </section>
+  <div class="hazard stripes-only" id="hazard"></div>
+
+  <div class="gridlabel"><span>[ GRID A / CORE METRICS ]</span><b>POLL 3000MS /// CACHE 2000MS</b></div>
+  <div class="grid">
+    <div class="cell na" id="t-mspt">
+      <div class="lbl">MSPT <i>/ TICK</i></div>
       <div class="num" id="mspt">n/a</div>
       <div class="meter"><span id="msptBar"></span></div>
-      <div class="foot" id="msptFoot">tick 平均 / 目標 &lt;50ms</div>
+      <div class="foot">LIMIT 50MS</div>
     </div>
-    <div class="tile na" id="t-players">
-      <div class="lbl">プレイヤー</div>
+    <div class="cell na" id="t-players">
+      <div class="lbl">SESSIONS <i>/ LIVE</i></div>
       <div class="num" id="players">n/a</div>
       <div class="meter" style="visibility:hidden"><span></span></div>
-      <div class="foot" id="playersFoot">オンライン</div>
+      <div class="foot" id="playersFoot">NO DATA</div>
     </div>
-    <div class="tile" id="t-heap">
-      <div class="lbl">JVMヒープ</div>
+    <div class="cell na" id="t-heap">
+      <div class="lbl">JVM HEAP</div>
       <div class="num" id="heap">n/a</div>
       <div class="meter"><span id="heapBar"></span></div>
-      <div class="foot" id="heapFoot">hwtab 再起動後に表示</div>
+      <div class="foot" id="heapFoot">HWTAB NOT LOADED</div>
     </div>
-    <div class="tile" id="t-cpu">
-      <div class="lbl">CPU</div>
-      <div class="num" id="cpu">–<span class="unit">%</span></div>
+    <div class="cell" id="t-cpu">
+      <div class="lbl">CPU <i>/ ALL CORES</i></div>
+      <div class="num" id="cpu">--<small>%</small></div>
       <div class="meter"><span id="cpuBar"></span></div>
-      <div class="foot" id="cpuFoot">全コア平均</div>
+      <div class="foot" id="cpuFoot">THRESHOLD 85%</div>
     </div>
-    <div class="tile" id="t-ram">
-      <div class="lbl">システムメモリ</div>
-      <div class="num" id="ram">–<span class="unit">GB</span></div>
+    <div class="cell" id="t-ram">
+      <div class="lbl">SYSTEM MEM</div>
+      <div class="num" id="ram">--<small>GB</small></div>
       <div class="meter"><span id="ramBar"></span></div>
-      <div class="foot" id="ramFoot">使用 / 総容量</div>
+      <div class="foot" id="ramFoot">USED / TOTAL</div>
+    </div>
+    <div class="cell na" id="t-temp">
+      <div class="lbl">PKG TEMP</div>
+      <div class="num" id="temp">n/a</div>
+      <div class="meter" style="visibility:hidden"><span></span></div>
+      <div class="foot">SENSOR MASKED / VBS</div>
     </div>
   </div>
 
   <div class="strip">
-    <div class="si"><div class="lbl">サーバー状態</div><div class="val" id="mcState">確認中</div></div>
-    <div class="si"><div class="lbl">サーバー稼働</div><div class="val" id="mcUptime">–</div></div>
-    <div class="si"><div class="lbl">システム稼働</div><div class="val" id="uptime">–</div></div>
-    <div class="si"><div class="lbl">ディスク C: 空き</div><div class="val" id="disk">–</div></div>
+    <div class="si"><div class="lbl">SERVER STATE</div><div class="val" id="mcState">--</div></div>
+    <div class="si"><div class="lbl">SERVER UPTIME</div><div class="val" id="mcUptime">--</div></div>
+    <div class="si"><div class="lbl">SYSTEM UPTIME</div><div class="val" id="uptime">--</div></div>
+    <div class="si"><div class="lbl">DISK C: FREE</div><div class="val" id="disk">--</div></div>
   </div>
 
-  <div class="console">
-    <div class="chead"><span class="t">Log · logs/latest.log</span><span class="h">末尾15行 · 3秒ごとに更新 · 自動スクロールなし</span></div>
-    <pre id="log">読み込み中…</pre>
+  <div class="lsec">
+    <div class="lhead">
+      <span class="l">LOG STREAM /// <b>logs/latest.log</b></span>
+      <span>TAIL 15 /// NO AUTOSCROLL /// POLL 3S</span>
+    </div>
+    <pre id="log">ACQUIRING…</pre>
   </div>
-</main>
 
-<footer><div class="wrap fi">HwTab dashboard · HTTP :8787 · LAN 192.168.1.0/24 のみ · 外部CDN不使用</div></footer>
+  <footer>
+    <span class="c">HWTAB CONSOLE UNIT/D-01</span>
+    <span>HTTP :8787 /// NO CDN /// ZERO DEPENDENCY</span>
+    <span class="r">BUILT FOR ST-LAPTOP /// 192.168.1.14</span>
+  </footer>
+</div>
 
 <script>
 const $ = id => document.getElementById(id);
 const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const fmt = (v,d) => (v===null||v===undefined||isNaN(v)) ? null : Number(v).toFixed(d===undefined?1:d);
 const setMeter = (el,pct,cls) => { el.style.width = Math.max(0,Math.min(100,pct||0))+'%'; el.className = cls||''; };
-const tileState = (id,st) => { const t=$(id); t.dataset.state=st||''; t.classList.toggle('na',!st&&t.classList.contains('na')?false:false); };
-const naTile = id => { const t=$(id); t.classList.add('na'); t.dataset.state=''; };
 const okTile = id => { const t=$(id); t.classList.remove('na'); };
-function stateOf(v,warn,crit){ if(v===null||v===undefined||isNaN(v))return null; return v>=crit?'crit':(v>=warn?'warn':'ok'); }
+const naTile = id => { const t=$(id); t.classList.add('na'); t.dataset.state=''; };
+const stTile = (id,st) => { $(id).dataset.state = (st&&st!=='ok')?st:''; };
+const stateOf = (v,warn,crit) => { if(v===null||v===undefined||isNaN(v))return null; return v>=crit?'crit':(v>=warn?'warn':'ok'); };
 setInterval(()=>{ $('clock').textContent = new Date().toLocaleTimeString('ja-JP',{hour12:false}); },1000);
 
 function renderLog(lines){
-  if(!lines||!lines.length){ $('log').textContent = 'n/a'; return; }
+  if(!lines||!lines.length){ $('log').textContent = 'NO DATA'; return; }
   $('log').innerHTML = lines.map(l=>{
     const e = esc(l);
     const m = e.match(/^(\[[^\]]*\]\s*)/);
@@ -204,91 +240,86 @@ async function tick(){
     if(!r.ok) throw new Error('http '+r.status);
     s = await r.json();
   }catch(e){
-    const o=$('overall'); o.className='state crit'; $('overallTx').textContent='APIエラー';
+    $('heroState').textContent='NO LINK'; $('heroState').className='crit';
+    $('heroSub').innerHTML='TELEMETRY FEED LOST /// <span class="bad">RETRYING</span>';
+    $('hazard').className='hazard on';
     return;
   }
   const n=s.node||{}, mc=s.mc||{};
   let worst = mc.state==='Running' ? 'ok' : 'crit';
 
-  /* CPU */
-  const cpu = n.cpu;
-  if(cpu===null||cpu===undefined){ $('cpu').innerHTML='n/a'; $('cpuFoot').textContent='n/a'; naTile('t-cpu'); setMeter($('cpuBar'),0,''); }
+  const cpu=n.cpu;
+  if(cpu===null||cpu===undefined){ $('cpu').innerHTML='n/a'; $('cpuFoot').textContent='NO DATA'; naTile('t-cpu'); setMeter($('cpuBar'),0,''); }
   else{
     okTile('t-cpu');
     const st=stateOf(cpu,85,95)||'ok';
-    if(st!=='ok'&&worst!=='crit'&&st==='crit')worst='crit'; if(st==='warn'&&worst==='ok')worst='warn';
-    $('cpu').innerHTML=fmt(cpu,0)+'<span class="unit">%</span>';
-    $('cpuFoot').textContent=fmt(cpu,0)+'% / 閾値 85%';
-    $('t-cpu').dataset.state=st==='ok'?'':st;
-    setMeter($('cpuBar'),cpu,st);
+    if(st==='crit')worst='crit'; else if(st==='warn'&&worst==='ok')worst='warn';
+    $('cpu').innerHTML=fmt(cpu,0)+'<small>%</small>';
+    $('cpuFoot').textContent='LOAD '+fmt(cpu,0)+'% / TH 85%';
+    stTile('t-cpu',st); setMeter($('cpuBar'),cpu,st);
   }
 
-  /* RAM */
-  if(n.ramUsed===null||n.ramUsed===undefined||!n.ramTotal){ $('ram').innerHTML='n/a'; $('ramFoot').textContent='n/a'; naTile('t-ram'); setMeter($('ramBar'),0,''); }
+  if(n.ramUsed===null||n.ramUsed===undefined||!n.ramTotal){ $('ram').innerHTML='n/a'; $('ramFoot').textContent='NO DATA'; naTile('t-ram'); setMeter($('ramBar'),0,''); }
   else{
     okTile('t-ram');
     const p=n.ramUsed/n.ramTotal*100, st=stateOf(p,90,97)||'ok';
-    if(st==='crit'&&worst!=='crit')worst='crit'; if(st==='warn'&&worst==='ok')worst='warn';
-    $('ram').innerHTML=fmt(n.ramUsed)+'<span class="unit">GB</span>';
+    if(st==='crit')worst='crit'; else if(st==='warn'&&worst==='ok')worst='warn';
+    $('ram').innerHTML=fmt(n.ramUsed)+'<small>GB</small>';
     $('ramFoot').textContent=fmt(n.ramUsed)+' / '+fmt(n.ramTotal,0)+' GB · '+Math.round(p)+'%';
-    $('t-ram').dataset.state=st==='ok'?'':st;
-    setMeter($('ramBar'),p,st);
+    stTile('t-ram',st); setMeter($('ramBar'),p,st);
   }
 
-  /* HEAP */
-  if(mc.heapUsed===null||mc.heapUsed===undefined||!mc.heapMax){ $('heap').innerHTML='n/a'; $('heapFoot').textContent='hwtab 再起動後に表示'; naTile('t-heap'); setMeter($('heapBar'),0,''); }
+  if(mc.heapUsed===null||mc.heapUsed===undefined||!mc.heapMax){ $('heap').innerHTML='n/a'; $('heapFoot').textContent='HWTAB NOT LOADED'; naTile('t-heap'); setMeter($('heapBar'),0,''); }
   else{
     okTile('t-heap');
     const p=mc.heapUsed/mc.heapMax*100, st=stateOf(p,85,95)||'ok';
-    if(st==='crit'&&worst!=='crit')worst='crit'; if(st==='warn'&&worst==='ok')worst='warn';
-    $('heap').innerHTML=fmt(mc.heapUsed)+'<span class="unit">GB</span>';
-    $('heapFoot').textContent=fmt(mc.heapUsed)+' / '+fmt(mc.heapMax,0)+' GB · '+Math.round(p)+'%';
-    $('t-heap').dataset.state=st==='ok'?'':st;
-    setMeter($('heapBar'),p,st);
-  }
-
-  /* TPS */
-  const tps=mc.tps;
-  if(tps===null||tps===undefined){ $('tps').innerHTML='n/a'; $('tpsFoot').textContent='hwtab 再起動後に表示'; naTile('t-tps'); setMeter($('tpsBar'),0,''); }
-  else{
-    okTile('t-tps');
-    const st=tps<10?'crit':(tps<15?'warn':'ok');
     if(st==='crit')worst='crit'; else if(st==='warn'&&worst==='ok')worst='warn';
-    $('tps').innerHTML=fmt(tps)+'<span class="unit">/20</span>';
-    $('tpsFoot').textContent=tps>=19.9?'フルスピード':'目標 20.0';
-    $('t-tps').dataset.state=st==='ok'?'':st;
-    setMeter($('tpsBar'),tps/20*100,st);
+    $('heap').innerHTML=fmt(mc.heapUsed)+'<small>GB</small>';
+    $('heapFoot').textContent=fmt(mc.heapUsed)+' / '+fmt(mc.heapMax,0)+' GB · '+Math.round(p)+'%';
+    stTile('t-heap',st); setMeter($('heapBar'),p,st);
   }
 
-  /* MSPT */
   const ms=mc.mspt;
   if(ms===null||ms===undefined){ $('mspt').innerHTML='n/a'; naTile('t-mspt'); setMeter($('msptBar'),0,''); }
   else{
     okTile('t-mspt');
     const st=ms>50?'crit':(ms>30?'warn':'ok');
-    if(st==='crit'&&worst!=='crit')worst='crit'; if(st==='warn'&&worst==='ok')worst='warn';
-    $('mspt').innerHTML=fmt(ms)+'<span class="unit">ms</span>';
-    $('msptFoot').textContent='tick 平均 · 上限 50ms';
-    $('t-mspt').dataset.state=st==='ok'?'':st;
-    setMeter($('msptBar'),Math.min(100,ms/50*100),st);
+    if(st==='crit')worst='crit'; else if(st==='warn'&&worst==='ok')worst='warn';
+    $('mspt').innerHTML=fmt(ms)+'<small>ms</small>';
+    stTile('t-mspt',st); setMeter($('msptBar'),Math.min(100,ms/50*100),st);
   }
 
-  /* players */
-  if(mc.players===null||mc.players===undefined){ $('players').innerHTML='n/a'; naTile('t-players'); }
-  else{ okTile('t-players'); $('players').innerHTML=mc.players+'<span class="unit">人</span>'; $('playersFoot').textContent=mc.players>0?'接続中':'誰もいない'; }
+  if(mc.players===null||mc.players===undefined){ $('players').innerHTML='n/a'; $('playersFoot').textContent='NO DATA'; naTile('t-players'); }
+  else{ okTile('t-players'); $('players').innerHTML=mc.players+'<small>USR</small>'; $('playersFoot').textContent=mc.players>0?'SESSIONS ACTIVE':'IDLE'; }
 
-  /* strip */
+  if(n.tempC===null||n.tempC===undefined){ $('temp').innerHTML='n/a'; naTile('t-temp'); }
+  else{ okTile('t-temp'); $('temp').innerHTML=fmt(n.tempC,0)+'<small>°C</small>'; }
+
+  const tps=mc.tps;
+  if(tps===null||tps===undefined){ $('tpsHero').innerHTML='--<small>/20 TPS</small>'; $('tpsFoot').textContent='HWTAB MOD NOT LOADED'; }
+  else{
+    const st=tps<10?'crit':(tps<15?'warn':'ok');
+    if(st==='crit')worst='crit'; else if(st==='warn'&&worst==='ok')worst='warn';
+    $('tpsHero').innerHTML=fmt(tps)+'<small>/20 TPS</small>';
+    $('tpsHero').className='tpsnum'+(st==='crit'?' crit':'');
+    $('tpsFoot').textContent=tps>=19.9?'FULL RATE':'DEGRADED TICK';
+  }
+
   const up = mc.state==='Running';
-  $('mcState').textContent = up?'Running':'Down';
+  $('mcState').textContent = up?'RUNNING':'DOWN';
   $('mcState').className = 'val'+(up?'':' na');
+  if(!up) worst='crit';
   $('mcUptime').textContent = mc.uptimeText||'n/a';
   $('uptime').textContent = n.uptimeText||'n/a';
   $('disk').textContent = (n.diskFreeGB===null||n.diskFreeGB===undefined)?'n/a':fmt(n.diskFreeGB)+' GB';
 
   renderLog(s.logTail);
 
-  const labels={ok:'正常',warn:'警告',crit:'異常',down:'サーバー停止',err:'APIエラー'};
-  const o=$('overall'); o.className='state '+worst; $('overallTx').textContent=labels[worst];
+  const hero=$('heroState');
+  if(worst==='crit'){ hero.textContent='CRITICAL'; hero.className='crit'; $('hazard').className='hazard on'; }
+  else if(worst==='warn'){ hero.textContent='DEGRADED'; hero.className='warn'; $('hazard').className='hazard on'; }
+  else{ hero.textContent='OPERATIONAL'; hero.className=''; $('hazard').className='hazard stripes-only'; }
+  $('heroSub').innerHTML = 'SERVER THREAD /// PORT 25565 /// <span class="'+(up?'ok':'bad')+'">'+(up?'STATE: RUNNING':'STATE: DOWN')+'</span> /// POLL 3S';
 }
 tick();
 setInterval(tick,3000);
@@ -418,7 +449,7 @@ $failCount = 0
 while ($true) {
     try {
         $listener = New-Object System.Net.HttpListener
-        $listener.Prefixes.Add('http://+:8787/')
+        $listener.Prefixes.Add('http://*:8787/')
         $listener.Start()
         $failCount = 0
         while ($listener.IsListening) {
