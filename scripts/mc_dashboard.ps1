@@ -1,5 +1,5 @@
-﻿# MC Node Dashboard - zero-dependency HttpListener dashboard for the MCServer laptop.
-#   GET  /          -> single-page dashboard (dark, Kubernetes-style, Japanese, no CDN)
+# MC Node Dashboard - zero-dependency HttpListener dashboard for the MCServer laptop.
+#   GET  /          -> single-page dashboard (dark instrument console, Japanese, no CDN)
 #   GET  /api/stats -> JSON snapshot (node + minecraft + log tail)
 # Listens on http://+:8787/ (LAN only - inbound is scoped by the
 # "MCServer Dashboard" firewall rule to 192.168.1.0/24).
@@ -19,138 +19,279 @@ $script:html = @'
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>MC Node Dashboard</title>
+<title>ST-LAPTOP / MC Console</title>
 <style>
-:root{--bg:#0f141a;--card:#171e28;--card2:#131a23;--line:#232d3f;--tx:#dbe2ea;--mut:#8b98a9;--ok:#2ecc71;--warn:#f1c40f;--crit:#e74c3c;--acc:#4f8cff}
+:root{
+  --bg:#0b0e13; --panel:#10141b; --panel2:#0d1117; --line:#1c2230; --line2:#242c3d;
+  --tx:#e8ecf3; --mut:#7d8798; --dim:#545e6e;
+  --ok:#34d399; --warn:#f5b23e; --crit:#ef5350;
+  --mono:"Cascadia Code","Cascadia Mono",Consolas,"Courier New",monospace;
+  --sans:"Segoe UI Variable Text","Segoe UI","Yu Gothic UI","Hiragino Sans",system-ui,sans-serif;
+}
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:radial-gradient(1200px 600px at 20% -10%,#16202c 0%,var(--bg) 55%);color:var(--tx);font-family:"Segoe UI","Hiragino Sans","Yu Gothic UI",system-ui,sans-serif;padding:22px;min-height:100vh}
-header{display:flex;justify-content:space-between;align-items:center;max-width:1180px;margin:0 auto 18px}
-h1{font-size:21px;font-weight:650;letter-spacing:.4px}
-.sub{color:var(--mut);font-size:12px;margin-top:3px}
-.pill{border:1px solid var(--line);border-radius:999px;padding:5px 14px;font-size:12.5px;font-weight:600;background:var(--card);color:var(--mut)}
-.pill.ok{color:var(--ok);border-color:rgba(46,204,113,.45)}
-.pill.warn{color:var(--warn);border-color:rgba(241,196,15,.45)}
-.pill.crit{color:var(--crit);border-color:rgba(231,76,60,.5)}
-.grid{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:16px}
-.card{background:linear-gradient(180deg,var(--card),var(--card2));border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:0 6px 24px rgba(0,0,0,.25)}
-.card.node{grid-column:1}
-.card.mc{grid-column:2}
-.card.wide{grid-column:1 / span 2}
-h2{display:flex;justify-content:space-between;align-items:center;font-size:12.5px;text-transform:uppercase;letter-spacing:1.4px;color:var(--mut);margin-bottom:14px;font-weight:600}
-.badge{font-size:11.5px;letter-spacing:.6px;padding:3px 10px;border-radius:6px;background:#1d2836;color:var(--mut);font-weight:700}
-.badge.ok{background:rgba(46,204,113,.14);color:var(--ok)}
-.badge.crit{background:rgba(231,76,60,.14);color:var(--crit)}
-.row{display:flex;justify-content:space-between;font-size:13.5px;margin:11px 0 5px}
-.label{color:var(--mut)}
-.value{font-weight:600;font-variant-numeric:tabular-nums}
-.bar{height:7px;background:#0d1218;border-radius:5px;overflow:hidden;border:1px solid #1a2331}
-.bar>span{display:block;height:100%;width:0%;background:var(--acc);border-radius:5px;transition:width .6s ease}
-.bar>span.ok{background:var(--ok)}
-.bar>span.warn{background:var(--warn)}
-.bar>span.crit{background:var(--crit)}
-pre#log{font-family:Consolas,"Courier New",monospace;font-size:11.5px;line-height:1.55;color:#aebccb;background:#0b0f14;border:1px solid var(--line);border-radius:8px;padding:12px 14px;height:230px;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:0}
-.hint{font-size:10.5px;letter-spacing:.4px;text-transform:none;color:#5d6b7d}
-footer{max-width:1180px;margin:14px auto 0;color:#5d6b7d;font-size:11px;text-align:center}
-@media (max-width:820px){.grid{grid-template-columns:1fr}.card.node,.card.mc,.card.wide{grid-column:1}}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--bg);color:var(--tx);font-family:var(--sans);min-height:100vh;
+  display:flex;flex-direction:column}
+.wrap{width:100%;max-width:1240px;margin:0 auto;padding:0 26px}
+
+/* ---------- header ---------- */
+header{border-bottom:1px solid var(--line)}
+.hrow{display:flex;align-items:center;justify-content:space-between;height:64px;gap:16px}
+.brand .eyebrow{font-family:var(--mono);font-size:9.5px;letter-spacing:2.2px;color:var(--dim);text-transform:uppercase}
+.brand h1{font-size:14.5px;font-weight:600;letter-spacing:.2px;margin-top:3px}
+.brand h1 small{color:var(--mut);font-weight:400;font-size:12px;margin-left:8px}
+.hstat{display:flex;align-items:center;gap:14px}
+.state{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;
+  letter-spacing:.8px;color:var(--mut);border:1px solid var(--line);border-radius:999px;padding:6px 13px;background:var(--panel)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--dim);flex:none}
+.state.ok .dot{background:var(--ok);box-shadow:0 0 8px rgba(52,211,153,.45)}
+.state.ok{color:var(--ok);border-color:rgba(52,211,153,.35)}
+.state.warn .dot{background:var(--warn);box-shadow:0 0 8px rgba(245,178,62,.45)}
+.state.warn{color:var(--warn);border-color:rgba(245,178,62,.4)}
+.state.crit .dot{background:var(--crit);box-shadow:0 0 10px rgba(239,83,80,.5);animation:blink 1.6s ease-in-out infinite}
+.state.crit{color:var(--crit);border-color:rgba(239,83,80,.45)}
+@keyframes blink{50%{opacity:.35}}
+.clock{font-family:var(--mono);font-size:12px;color:var(--mut);letter-spacing:.5px;font-variant-numeric:tabular-nums}
+
+/* ---------- tiles ---------- */
+.tiles{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:22px 0 10px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:13px 15px 12px;
+  display:flex;flex-direction:column;gap:8px;min-height:108px;transition:border-color .3s}
+.tile:hover{border-color:var(--line2)}
+.tile .lbl{font-size:10.5px;font-weight:600;letter-spacing:1.1px;color:var(--mut)}
+.tile .lbl .tgt{color:var(--dim);letter-spacing:.4px;font-weight:400}
+.tile .num{font-family:var(--mono);font-size:33px;font-weight:700;line-height:1;
+  letter-spacing:-.5px;font-variant-numeric:tabular-nums;margin-top:auto;color:var(--tx);
+  transition:color .4s}
+.tile .num .unit{font-size:13px;font-weight:400;color:var(--mut);letter-spacing:0;margin-left:4px}
+.tile[data-state="warn"] .num{color:var(--warn)}
+.tile[data-state="crit"] .num{color:var(--crit)}
+.tile.na .num{color:var(--dim);font-size:24px}
+.meter{height:3px;background:#171d29;border-radius:2px;overflow:hidden}
+.meter>span{display:block;height:100%;width:0%;background:var(--ok);border-radius:2px;transition:width .6s ease,background-color .4s}
+.meter>span.warn{background:var(--warn)}
+.meter>span.crit{background:var(--crit)}
+.tile .foot{font-family:var(--mono);font-size:10px;color:var(--dim);letter-spacing:.3px;font-variant-numeric:tabular-nums;min-height:13px}
+
+/* ---------- strip ---------- */
+.strip{display:grid;grid-template-columns:repeat(4,1fr);background:var(--panel);
+  border:1px solid var(--line);border-radius:10px;margin-bottom:10px}
+.si{padding:11px 16px;border-left:1px solid var(--line)}
+.si:first-child{border-left:none}
+.si .lbl{font-size:10px;font-weight:600;letter-spacing:1.1px;color:var(--mut);margin-bottom:5px}
+.si .val{font-family:var(--mono);font-size:14px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--tx)}
+.si .val.na{color:var(--dim)}
+
+/* ---------- log ---------- */
+.console{background:var(--panel2);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:10px}
+.chead{display:flex;justify-content:space-between;align-items:center;padding:9px 16px;border-bottom:1px solid var(--line)}
+.chead .t{font-family:var(--mono);font-size:10.5px;letter-spacing:1.4px;color:var(--mut);text-transform:uppercase}
+.chead .h{font-family:var(--mono);font-size:10px;color:var(--dim)}
+pre#log{font-family:var(--mono);font-size:11.3px;line-height:1.62;color:#9aa5b5;height:264px;
+  overflow:auto;padding:11px 16px;white-space:pre-wrap;word-break:break-all}
+pre#log .er{color:var(--crit)}
+pre#log .wn{color:var(--warn)}
+pre#log .ts{color:var(--dim)}
+
+/* ---------- footer ---------- */
+footer{margin-top:auto;padding:14px 0 18px}
+footer .fi{border-top:1px solid var(--line);padding-top:12px;font-family:var(--mono);
+  font-size:10px;color:var(--dim);text-align:center;letter-spacing:.4px}
+
+@media (max-width:1100px){.tiles{grid-template-columns:repeat(3,1fr)}}
+@media (max-width:820px){.strip{grid-template-columns:repeat(2,1fr)}.si:nth-child(3){border-left:none;border-top:1px solid var(--line)}.si:nth-child(4){border-top:1px solid var(--line)}}
+@media (max-width:620px){.tiles{grid-template-columns:repeat(2,1fr)}.hrow{height:auto;padding:12px 0;flex-wrap:wrap}.clock{display:none}}
 </style>
 </head>
 <body>
 <header>
-  <div>
-    <h1>MC Node Dashboard</h1>
-    <div class="sub">ST-LAPTOP · Minecraft 1.21.1 / NeoForge · 3秒間隔で自動更新</div>
+  <div class="wrap hrow">
+    <div class="brand">
+      <div class="eyebrow">HwTab Console</div>
+      <h1>ST-LAPTOP<small>Minecraft 1.21.1 / NeoForge</small></h1>
+    </div>
+    <div class="hstat">
+      <span class="clock" id="clock">--:--:--</span>
+      <span class="state" id="overall"><i class="dot"></i><span id="overallTx">接続中</span></span>
+    </div>
   </div>
-  <span id="overall" class="pill">取得中…</span>
 </header>
-<main class="grid">
-  <section class="card node">
-    <h2><span>Node Health</span><span id="nodeState" class="badge">--</span></h2>
-    <div class="row"><span class="label">CPU使用率</span><span class="value" id="cpu">--</span></div>
-    <div class="bar"><span id="cpuBar"></span></div>
-    <div class="row"><span class="label">メモリ使用量</span><span class="value" id="ram">--</span></div>
-    <div class="bar"><span id="ramBar"></span></div>
-    <div class="row"><span class="label">CPU温度</span><span class="value" id="temp">--</span></div>
-    <div class="bar"><span id="tempBar"></span></div>
-    <div class="row"><span class="label">ディスク C: 空き</span><span class="value" id="disk">--</span></div>
-    <div class="row"><span class="label">システム稼働時間</span><span class="value" id="uptime">--</span></div>
-  </section>
-  <section class="card mc">
-    <h2><span>Workload: minecraft-server</span><span id="mcState" class="badge">--</span></h2>
-    <div class="row"><span class="label">TPS (20.0が正常)</span><span class="value" id="tps">--</span></div>
-    <div class="row"><span class="label">MSPT</span><span class="value" id="mspt">--</span></div>
-    <div class="row"><span class="label">プレイヤー数</span><span class="value" id="players">--</span></div>
-    <div class="row"><span class="label">JVMヒープ</span><span class="value" id="heap">--</span></div>
-    <div class="bar"><span id="heapBar"></span></div>
-    <div class="row"><span class="label">サーバー稼働時間</span><span class="value" id="mcUptime">--</span></div>
-  </section>
-  <section class="card wide">
-    <h2><span>Log Tail</span><span class="hint">logs/latest.log 末尾15行 · 自動スクロールなし</span></h2>
+
+<main class="wrap">
+  <div class="tiles">
+    <div class="tile na" id="t-tps">
+      <div class="lbl">TPS <span class="tgt">/ 20.0</span></div>
+      <div class="num" id="tps">n/a</div>
+      <div class="meter"><span id="tpsBar"></span></div>
+      <div class="foot" id="tpsFoot">hwtab 再起動後に表示</div>
+    </div>
+    <div class="tile na" id="t-mspt">
+      <div class="lbl">MSPT</div>
+      <div class="num" id="mspt">n/a</div>
+      <div class="meter"><span id="msptBar"></span></div>
+      <div class="foot" id="msptFoot">tick 平均 / 目標 &lt;50ms</div>
+    </div>
+    <div class="tile na" id="t-players">
+      <div class="lbl">プレイヤー</div>
+      <div class="num" id="players">n/a</div>
+      <div class="meter" style="visibility:hidden"><span></span></div>
+      <div class="foot" id="playersFoot">オンライン</div>
+    </div>
+    <div class="tile" id="t-heap">
+      <div class="lbl">JVMヒープ</div>
+      <div class="num" id="heap">n/a</div>
+      <div class="meter"><span id="heapBar"></span></div>
+      <div class="foot" id="heapFoot">hwtab 再起動後に表示</div>
+    </div>
+    <div class="tile" id="t-cpu">
+      <div class="lbl">CPU</div>
+      <div class="num" id="cpu">–<span class="unit">%</span></div>
+      <div class="meter"><span id="cpuBar"></span></div>
+      <div class="foot" id="cpuFoot">全コア平均</div>
+    </div>
+    <div class="tile" id="t-ram">
+      <div class="lbl">システムメモリ</div>
+      <div class="num" id="ram">–<span class="unit">GB</span></div>
+      <div class="meter"><span id="ramBar"></span></div>
+      <div class="foot" id="ramFoot">使用 / 総容量</div>
+    </div>
+  </div>
+
+  <div class="strip">
+    <div class="si"><div class="lbl">サーバー状態</div><div class="val" id="mcState">確認中</div></div>
+    <div class="si"><div class="lbl">サーバー稼働</div><div class="val" id="mcUptime">–</div></div>
+    <div class="si"><div class="lbl">システム稼働</div><div class="val" id="uptime">–</div></div>
+    <div class="si"><div class="lbl">ディスク C: 空き</div><div class="val" id="disk">–</div></div>
+  </div>
+
+  <div class="console">
+    <div class="chead"><span class="t">Log · logs/latest.log</span><span class="h">末尾15行 · 3秒ごとに更新 · 自動スクロールなし</span></div>
     <pre id="log">読み込み中…</pre>
-  </section>
+  </div>
 </main>
-<footer>HwTab dashboard · HTTP :8787 (LAN 192.168.1.0/24 のみ) · 外部CDN不使用</footer>
+
+<footer><div class="wrap fi">HwTab dashboard · HTTP :8787 · LAN 192.168.1.0/24 のみ · 外部CDN不使用</div></footer>
+
 <script>
 const $ = id => document.getElementById(id);
-const fmt = (v, d) => (v === null || v === undefined || isNaN(v)) ? 'n/a' : Number(v).toFixed(d === undefined ? 1 : d);
-function bar(el, pct, cls) { el.style.width = Math.max(0, Math.min(100, pct || 0)) + '%'; el.className = cls || ''; }
-function statusOf(t, warn, crit) { if (t === null || t === undefined || isNaN(t)) return null; return t >= crit ? 'crit' : (t >= warn ? 'warn' : 'ok'); }
-async function tick() {
-  try {
-    const r = await fetch('/api/stats', { cache: 'no-store' });
-    if (!r.ok) throw new Error('http ' + r.status);
-    const s = await r.json();
-    const n = s.node || {}, mc = s.mc || {};
-    $('cpu').textContent = fmt(n.cpu, 0) + '%';
-    bar($('cpuBar'), n.cpu, statusOf(n.cpu, 85, 95) || '');
-    if (n.ramUsed !== null && n.ramUsed !== undefined && n.ramTotal) {
-      const p = n.ramUsed / n.ramTotal * 100;
-      $('ram').textContent = fmt(n.ramUsed) + ' / ' + fmt(n.ramTotal, 0) + ' GB (' + Math.round(p) + '%)';
-      bar($('ramBar'), p, statusOf(p, 90, 97) || '');
-    } else { $('ram').textContent = 'n/a'; bar($('ramBar'), 0, ''); }
-    const t = n.tempC;
-    if (t === null || t === undefined) { $('temp').textContent = 'n/a (センサーなし)'; $('temp').style.color = 'var(--mut)'; bar($('tempBar'), 0, ''); }
-    else {
-      $('temp').textContent = fmt(t, 0) + ' °C';
-      $('temp').style.color = t > 85 ? 'var(--crit)' : (t > 70 ? 'var(--warn)' : 'var(--ok)');
-      bar($('tempBar'), Math.min(100, Math.max(0, (t - 40) * 2.5)), t > 85 ? 'crit' : (t > 70 ? 'warn' : ''));
-    }
-    $('disk').textContent = (n.diskFreeGB === null || n.diskFreeGB === undefined) ? 'n/a' : fmt(n.diskFreeGB) + ' GB';
-    $('uptime').textContent = n.uptimeText || 'n/a';
-    const up = mc.state === 'Running';
-    $('mcState').textContent = up ? 'Running' : 'Down';
-    $('mcState').className = 'badge ' + (up ? 'ok' : 'crit');
-    const tps = mc.tps;
-    $('tps').textContent = fmt(tps);
-    $('tps').style.color = (tps === null || tps === undefined) ? 'var(--mut)' : (tps < 10 ? 'var(--crit)' : (tps < 15 ? 'var(--warn)' : 'var(--ok)'));
-    const ms = mc.mspt;
-    $('mspt').textContent = (ms === null || ms === undefined) ? 'n/a' : fmt(ms) + ' ms';
-    $('mspt').style.color = (ms === null || ms === undefined) ? 'var(--mut)' : (ms > 50 ? 'var(--crit)' : (ms > 30 ? 'var(--warn)' : 'var(--ok)'));
-    $('players').textContent = (mc.players === null || mc.players === undefined) ? 'n/a' : mc.players + ' 人';
-    if (mc.heapUsed !== null && mc.heapUsed !== undefined && mc.heapMax) {
-      const p = mc.heapUsed / mc.heapMax * 100;
-      $('heap').textContent = fmt(mc.heapUsed) + ' / ' + fmt(mc.heapMax) + ' GB (' + Math.round(p) + '%)';
-      bar($('heapBar'), p, statusOf(p, 85, 95) || '');
-    } else { $('heap').textContent = 'n/a'; bar($('heapBar'), 0, ''); }
-    $('mcUptime').textContent = mc.uptimeText || 'n/a';
-    $('log').textContent = (s.logTail && s.logTail.length) ? s.logTail.join('\n') : 'n/a';
-    let worst = 'ok';
-    if (!up) worst = 'crit';
-    if (statusOf(t, 70, 85) === 'warn' && worst !== 'crit') worst = 'warn';
-    if (statusOf(t, 70, 85) === 'crit') worst = 'crit';
-    if (tps !== null && tps !== undefined && tps < 15 && worst === 'ok') worst = 'warn';
-    if (tps !== null && tps !== undefined && tps < 10) worst = 'crit';
-    const labels = { ok: '正常 (Healthy)', warn: '警告 (Warning)', crit: '異常 (Critical)' };
-    $('overall').textContent = labels[worst];
-    $('overall').className = 'pill ' + worst;
-    $('nodeState').textContent = 'NODE';
-    $('nodeState').className = 'badge ' + (statusOf(t, 70, 85) === 'crit' ? 'crit' : 'ok');
-  } catch (e) {
-    $('overall').textContent = 'API接続エラー';
-    $('overall').className = 'pill crit';
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const fmt = (v,d) => (v===null||v===undefined||isNaN(v)) ? null : Number(v).toFixed(d===undefined?1:d);
+const setMeter = (el,pct,cls) => { el.style.width = Math.max(0,Math.min(100,pct||0))+'%'; el.className = cls||''; };
+const tileState = (id,st) => { const t=$(id); t.dataset.state=st||''; t.classList.toggle('na',!st&&t.classList.contains('na')?false:false); };
+const naTile = id => { const t=$(id); t.classList.add('na'); t.dataset.state=''; };
+const okTile = id => { const t=$(id); t.classList.remove('na'); };
+function stateOf(v,warn,crit){ if(v===null||v===undefined||isNaN(v))return null; return v>=crit?'crit':(v>=warn?'warn':'ok'); }
+setInterval(()=>{ $('clock').textContent = new Date().toLocaleTimeString('ja-JP',{hour12:false}); },1000);
+
+function renderLog(lines){
+  if(!lines||!lines.length){ $('log').textContent = 'n/a'; return; }
+  $('log').innerHTML = lines.map(l=>{
+    const e = esc(l);
+    const m = e.match(/^(\[[^\]]*\]\s*)/);
+    const ts = m?('<span class="ts">'+m[1]+'</span>'):'';
+    const body = m?e.slice(m[1].length):e;
+    let cl='';
+    if(/ERROR|FATAL|Exception/.test(body)) cl=' class="er"';
+    else if(/WARN/.test(body)) cl=' class="wn"';
+    return ts+'<span'+cl+'>'+body+'</span>';
+  }).join('\n');
+}
+
+async function tick(){
+  let s;
+  try{
+    const r = await fetch('/api/stats',{cache:'no-store'});
+    if(!r.ok) throw new Error('http '+r.status);
+    s = await r.json();
+  }catch(e){
+    const o=$('overall'); o.className='state crit'; $('overallTx').textContent='APIエラー';
+    return;
   }
+  const n=s.node||{}, mc=s.mc||{};
+  let worst = mc.state==='Running' ? 'ok' : 'crit';
+
+  /* CPU */
+  const cpu = n.cpu;
+  if(cpu===null||cpu===undefined){ $('cpu').innerHTML='n/a'; $('cpuFoot').textContent='n/a'; naTile('t-cpu'); setMeter($('cpuBar'),0,''); }
+  else{
+    okTile('t-cpu');
+    const st=stateOf(cpu,85,95)||'ok';
+    if(st!=='ok'&&worst!=='crit'&&st==='crit')worst='crit'; if(st==='warn'&&worst==='ok')worst='warn';
+    $('cpu').innerHTML=fmt(cpu,0)+'<span class="unit">%</span>';
+    $('cpuFoot').textContent=fmt(cpu,0)+'% / 閾値 85%';
+    $('t-cpu').dataset.state=st==='ok'?'':st;
+    setMeter($('cpuBar'),cpu,st);
+  }
+
+  /* RAM */
+  if(n.ramUsed===null||n.ramUsed===undefined||!n.ramTotal){ $('ram').innerHTML='n/a'; $('ramFoot').textContent='n/a'; naTile('t-ram'); setMeter($('ramBar'),0,''); }
+  else{
+    okTile('t-ram');
+    const p=n.ramUsed/n.ramTotal*100, st=stateOf(p,90,97)||'ok';
+    if(st==='crit'&&worst!=='crit')worst='crit'; if(st==='warn'&&worst==='ok')worst='warn';
+    $('ram').innerHTML=fmt(n.ramUsed)+'<span class="unit">GB</span>';
+    $('ramFoot').textContent=fmt(n.ramUsed)+' / '+fmt(n.ramTotal,0)+' GB · '+Math.round(p)+'%';
+    $('t-ram').dataset.state=st==='ok'?'':st;
+    setMeter($('ramBar'),p,st);
+  }
+
+  /* HEAP */
+  if(mc.heapUsed===null||mc.heapUsed===undefined||!mc.heapMax){ $('heap').innerHTML='n/a'; $('heapFoot').textContent='hwtab 再起動後に表示'; naTile('t-heap'); setMeter($('heapBar'),0,''); }
+  else{
+    okTile('t-heap');
+    const p=mc.heapUsed/mc.heapMax*100, st=stateOf(p,85,95)||'ok';
+    if(st==='crit'&&worst!=='crit')worst='crit'; if(st==='warn'&&worst==='ok')worst='warn';
+    $('heap').innerHTML=fmt(mc.heapUsed)+'<span class="unit">GB</span>';
+    $('heapFoot').textContent=fmt(mc.heapUsed)+' / '+fmt(mc.heapMax,0)+' GB · '+Math.round(p)+'%';
+    $('t-heap').dataset.state=st==='ok'?'':st;
+    setMeter($('heapBar'),p,st);
+  }
+
+  /* TPS */
+  const tps=mc.tps;
+  if(tps===null||tps===undefined){ $('tps').innerHTML='n/a'; $('tpsFoot').textContent='hwtab 再起動後に表示'; naTile('t-tps'); setMeter($('tpsBar'),0,''); }
+  else{
+    okTile('t-tps');
+    const st=tps<10?'crit':(tps<15?'warn':'ok');
+    if(st==='crit')worst='crit'; else if(st==='warn'&&worst==='ok')worst='warn';
+    $('tps').innerHTML=fmt(tps)+'<span class="unit">/20</span>';
+    $('tpsFoot').textContent=tps>=19.9?'フルスピード':'目標 20.0';
+    $('t-tps').dataset.state=st==='ok'?'':st;
+    setMeter($('tpsBar'),tps/20*100,st);
+  }
+
+  /* MSPT */
+  const ms=mc.mspt;
+  if(ms===null||ms===undefined){ $('mspt').innerHTML='n/a'; naTile('t-mspt'); setMeter($('msptBar'),0,''); }
+  else{
+    okTile('t-mspt');
+    const st=ms>50?'crit':(ms>30?'warn':'ok');
+    if(st==='crit'&&worst!=='crit')worst='crit'; if(st==='warn'&&worst==='ok')worst='warn';
+    $('mspt').innerHTML=fmt(ms)+'<span class="unit">ms</span>';
+    $('msptFoot').textContent='tick 平均 · 上限 50ms';
+    $('t-mspt').dataset.state=st==='ok'?'':st;
+    setMeter($('msptBar'),Math.min(100,ms/50*100),st);
+  }
+
+  /* players */
+  if(mc.players===null||mc.players===undefined){ $('players').innerHTML='n/a'; naTile('t-players'); }
+  else{ okTile('t-players'); $('players').innerHTML=mc.players+'<span class="unit">人</span>'; $('playersFoot').textContent=mc.players>0?'接続中':'誰もいない'; }
+
+  /* strip */
+  const up = mc.state==='Running';
+  $('mcState').textContent = up?'Running':'Down';
+  $('mcState').className = 'val'+(up?'':' na');
+  $('mcUptime').textContent = mc.uptimeText||'n/a';
+  $('uptime').textContent = n.uptimeText||'n/a';
+  $('disk').textContent = (n.diskFreeGB===null||n.diskFreeGB===undefined)?'n/a':fmt(n.diskFreeGB)+' GB';
+
+  renderLog(s.logTail);
+
+  const labels={ok:'正常',warn:'警告',crit:'異常',down:'サーバー停止',err:'APIエラー'};
+  const o=$('overall'); o.className='state '+worst; $('overallTx').textContent=labels[worst];
 }
 tick();
-setInterval(tick, 3000);
+setInterval(tick,3000);
 </script>
 </body>
 </html>
@@ -217,28 +358,16 @@ function Get-Snapshot {
         if ($parts.Count -eq 2) { try { $ramU = [double]$parts[0]; $ramT = [double]$parts[1] } catch { } }
     }
     if ($hw.ContainsKey('temp')) { try { $tempC = [double]$hw['temp'] } catch { } }
-    if ($null -eq $cpu) {
-        try {
-            $cpu = (Get-CimInstance Win32_Processor -ErrorAction Stop | Measure-Object -Property LoadPercentage -Average).Average
-            if ($null -ne $cpu) { $cpu = [double]$cpu }
-        } catch { }
-    }
-    if ($null -eq $ramT) {
-        try {
-            $os = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
-            $ramT = [math]::Round($os.TotalVisibleMemorySize / 1MB, 1)
-            $ramU = [math]::Round(($os.TotalVisibleMemorySize - $os.FreePhysicalMemory) / 1MB, 1)
-        } catch { }
-    }
+    # uptime from the System process start time - pure native, no WMI
     $upText = $null
     try {
-        $os2 = Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
-        $upText = Format-Duration ((Get-Date) - $os2.LastBootUpTime)
+        $sysProc = Get-Process -Id 4 -ErrorAction Stop
+        $upText = Format-Duration ((Get-Date) - $sysProc.StartTime)
     } catch { }
     $disk = $null
     try {
-        $d = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'" -ErrorAction Stop
-        $disk = [math]::Round($d.FreeSpace / 1GB, 1)
+        $drv = New-Object System.IO.DriveInfo('C:')
+        $disk = [math]::Round($drv.AvailableFreeSpace / 1GB, 1)
     } catch { }
 
     $state = 'Down'
@@ -273,6 +402,17 @@ function Get-Snapshot {
     return $json
 }
 
+$script:cacheJson = $null
+$script:cacheAt = [datetime]::MinValue
+function Get-SnapshotCached {
+    $ageMs = ((Get-Date) - $script:cacheAt).TotalMilliseconds
+    if ($null -eq $script:cacheJson -or $ageMs -ge 2000) {
+        $script:cacheJson = Get-Snapshot
+        $script:cacheAt = Get-Date
+    }
+    return $script:cacheJson
+}
+
 $listener = $null
 $failCount = 0
 while ($true) {
@@ -289,7 +429,7 @@ while ($true) {
                 $res.Headers.Add('Cache-Control', 'no-store')
                 $path = $ctx.Request.Url.AbsolutePath
                 if ($path -eq '/api/stats') {
-                    $body = [System.Text.Encoding]::UTF8.GetBytes((Get-Snapshot))
+                    $body = [System.Text.Encoding]::UTF8.GetBytes((Get-SnapshotCached))
                     $res.ContentType = 'application/json; charset=utf-8'
                     $res.ContentLength64 = $body.Length
                     $res.OutputStream.Write($body, 0, $body.Length)
