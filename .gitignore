@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+
+# Local build artifacts (published via GitHub Releases instead)
+dist/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+bin/
+
+# OS
+Thumbs.db
+.DS_Store

@@ -1,0 +1,39 @@
+plugins {
+    id 'java-library'
+    id 'net.neoforged.moddev' version '2.0.144'
+}
+
+version = '1.0.0'
+group = 'dev.motch.hwtab'
+
+base {
+    archivesName = 'hwtab'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+neoForge {
+    // NeoForge for Minecraft 1.21.1
+    version = '21.1.234'
+
+    mods {
+        hwtab {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+jar {
+    manifest {
+        attributes([
+                'Specification-Title'   : 'HwTab',
+                'Specification-Version' : '1.0.0',
+                'Implementation-Title'  : 'HwTab',
+                'Implementation-Version': '1.0.0'
+        ])
+    }
+}
