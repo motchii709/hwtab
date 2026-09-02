@@ -392,7 +392,7 @@ function renderMods(){
       +'<span class="mst '+(m.enabled?'on':'off')+'">'+(m.enabled?'ON':'OFF')+'</span>'
       +'<span class="mbtns">'
       +'<button class="mbtn" data-a="toggle" data-n="'+escAttr(m.name)+'">'+(m.enabled?'DISABLE':'ENABLE')+'</button>'
-      +'<button class="mbtn del" data-a="del" data-n="'+escAttr(m.name)+'">DEL</button>'
+      +'<button class="mbtn del" data-a="delete" data-n="'+escAttr(m.name)+'">DEL</button>'
       +'</span></div>';
   }).join('');
 }
@@ -402,16 +402,16 @@ $('modsBody').addEventListener('click', async ev=>{
   const b = ev.target.closest('button.mbtn');
   if(!b) return;
   const name = b.getAttribute('data-n'), act = b.getAttribute('data-a');
-  if(act==='del'){
+  if(act==='delete'){
     if(!b.classList.contains('armed')){ b.dataset.label=b.textContent; b.classList.add('armed'); b.textContent='SURE?';
       setTimeout(()=>{ b.classList.remove('armed'); b.textContent=b.dataset.label; },3000); return; }
   }
   b.disabled = true;
   try{
     const r = await fetch('/api/mods/'+act, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})});
-    const d = await r.json();
+    const d = await r.json().catch(()=>({ok:false,err:'HTTP '+r.status}));
     if(!d.ok) opsNote('MOD OP FAILED: '+(d.err||'?'),'err'); else opsNote('MOD '+(act==='toggle'?'TOGGLED':'DELETED')+': '+name,'ok');
-  }catch(e){ opsNote('MOD OP REQUEST FAILED','err'); }
+  }catch(e){ opsNote('REQUEST FAILED: '+e,'err'); }
   loadMods();
 });
 $('btnUpload').addEventListener('click', ()=>$('modFile').click());
