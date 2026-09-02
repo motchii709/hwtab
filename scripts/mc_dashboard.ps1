@@ -1,18 +1,22 @@
-# MC Node Dashboard - zero-dependency HttpListener dashboard + ops console.
-#   GET  /                -> single-page tactical console (no CDN)
-#   GET  /api/stats       -> JSON snapshot (node + mc + action + mods + log tail)
-#   GET  /api/mods        -> mod inventory
-#   POST /api/action/*    -> restart / stop / start (spawns mc_action.ps1 detached)
-#   POST /api/mods/toggle -> enable/disable mod (.jar <-> .jar.disabled)
-#   POST /api/mods/delete -> move mod to mods\_trash
-#   POST /api/mods/upload -> raw octet-stream jar upload (?name=)
+# MC Node Console - zero-dependency HttpListener dashboard (M3 Expressive) + ops console.
+#   GET  /                  -> single-page M3 Expressive console (no CDN)
+#   GET  /api/stats         -> JSON snapshot (node + mc + action + mods + log tail)
+#   GET  /api/mods          -> mod inventory
+#   GET  /api/logs          -> available log files
+#   GET  /api/log           -> tail (?lines=) or delta (?offset=) of a log file
+#   GET  /api/log/download  -> raw log file attachment
+#   POST /api/action/*      -> restart / stop / start (spawns mc_action.ps1 detached)
+#   POST /api/mods/toggle   -> enable/disable mod (.jar <-> .jar.disabled)
+#   POST /api/mods/delete   -> move mod to mods\_trash
+#   POST /api/mods/upload   -> raw octet-stream jar upload (?name=)
 # Listens on http://*:8787/ (LAN only - scoped by firewall rule "MCServer Dashboard").
 # Designed for scheduled task MCServer-Dashboard (SYSTEM / onstart / HIGHEST).
 $ErrorActionPreference = 'Continue'
 $mcDir = 'C:\Users\motch\MCServer'
 $hwFile = Join-Path $mcDir 'hw_stats_hw.txt'
 $statsFile = Join-Path $mcDir 'hw_stats.txt'
-$logFile = Join-Path $mcDir 'logs\latest.log'
+$logDir = Join-Path $mcDir 'logs'
+$logFile = Join-Path $logDir 'latest.log'
 $modsDir = Join-Path $mcDir 'mods'
 $trashDir = Join-Path $modsDir '_trash'
 $actionScript = 'C:\Users\motch\MCServer\hwtools\mc_action.ps1'
@@ -26,286 +30,324 @@ $script:html = @'
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ST-LAPTOP /// NODE TELEMETRY</title>
+<title>MC Node Console — ST-LAPTOP</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='9' fill='%234A5AD8'/%3E%3Cpath d='M8 21V11l5 5 3-6 3 6 5-5v10' stroke='%23fff' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 :root{
-  --bg:#0a0a0a; --panel:#101010; --panel2:#0d0d0d; --line:#262626; --line2:#3a3a3a;
-  --fg:#eaeaea; --mut:#8a8a8a; --dim:#4a4a4a;
-  --red:#ff2a2a; --grn:#4af626;
-  --mono:"Cascadia Code","Cascadia Mono",Consolas,"Courier New",monospace;
-  --heavy:"Arial Black","Segoe UI Black","Helvetica Neue",Arial,sans-serif;
+  --primary:#4a5ad8; --on-primary:#fff; --primary-container:#dfe0ff; --on-primary-container:#000f5a;
+  --secondary-container:#e1e2f9; --on-secondary-container:#1a1c2e;
+  --tertiary-container:#b8f1b6; --on-tertiary-container:#00210a;
+  --error:#b3261e; --on-error:#fff; --error-container:#f9dedc; --on-error-container:#410e0b;
+  --warn:#9a6300; --warn-container:#ffddb3;
+  --surface:#fbf8ff; --on-surface:#1b1b21; --on-surface-var:#46464f;
+  --outline:#767680; --outline-var:#c7c5d2;
+  --sc-low:#f5f2fc; --sc:#efedf7; --sc-high:#e9e7f1; --sc-highest:#e3e1eb;
+  --term-bg:#15151c; --term-fg:#e5e1e9; --term-dim:#8e8a96; --term-warn:#ffb868; --term-err:#ffb4ab; --term-ok:#7adb8f;
+  --emph:cubic-bezier(.2,0,0,1);
+  --shadow:0 1px 2px rgba(35,32,84,.18),0 6px 20px rgba(35,32,84,.10);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--fg);font-family:var(--mono);min-height:100vh;overflow-x:hidden}
-body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:90;
-  background:repeating-linear-gradient(0deg,rgba(255,255,255,.022) 0 1px,transparent 1px 3px)}
-::selection{background:var(--red);color:#fff}
-.wrap{max-width:1420px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column}
-.wrap>*{flex:0 0 auto}
-.wrap>.lsec{flex:1 1 auto}
+html{scroll-behavior:smooth}
+body{background:var(--surface);color:var(--on-surface);min-height:100dvh;
+  font-family:"Segoe UI Variable Text","Segoe UI",Roboto,"Noto Sans JP","Yu Gothic UI",sans-serif}
+::selection{background:var(--primary-container);color:var(--on-primary-container)}
+button,input,select{font-family:inherit}
+:focus-visible{outline:3px solid var(--primary);outline-offset:2px;border-radius:8px}
+.wrap{max-width:1280px;margin:0 auto;padding:0 20px 64px}
 
-/* ---------- top bar ---------- */
-.bar{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;
-  padding:7px 18px;border-bottom:2px solid var(--line);font-size:10px;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--mut)}
-.bar b{color:var(--fg);font-weight:700}
-.bar .r{display:flex;gap:22px}
-.bar .r span::before{content:"+ ";color:var(--dim)}
+/* ---------- app bar ---------- */
+.appbar{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+  padding:20px 0 14px;position:sticky;top:0;background:color-mix(in srgb,var(--surface) 88%,transparent);
+  backdrop-filter:blur(12px);z-index:50}
+.brand{display:flex;align-items:center;gap:14px}
+.logo{width:44px;height:44px;border-radius:14px;background:var(--primary);display:grid;place-items:center;flex:0 0 auto}
+.brand h1{font-size:26px;font-weight:650;letter-spacing:-.02em;line-height:1.1}
+.brand .sub{font-size:12.5px;color:var(--on-surface-var);letter-spacing:.02em}
+.abar-right{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+/* ---------- chips ---------- */
+.chip{display:inline-flex;align-items:center;gap:7px;border-radius:999px;padding:7px 15px;
+  font-size:13px;font-weight:600;background:var(--sc-high);color:var(--on-surface-var);border:none;
+  transition:transform .25s var(--emph),background-color .25s var(--emph);white-space:nowrap}
+.chip .dot{width:8px;height:8px;border-radius:99px;background:var(--on-surface-var)}
+.chip.ok{background:var(--tertiary-container);color:var(--on-tertiary-container)}
+.chip.ok .dot{background:#1d7a2c}
+.chip.bad{background:var(--error-container);color:var(--on-error-container)}
+.chip.bad .dot{background:var(--error)}
+.chip.warn{background:var(--warn-container);color:var(--warn)}
+.chip.plain{background:var(--sc);font-variant-numeric:tabular-nums}
+.chip.tog{cursor:pointer;border:1px solid var(--outline-var)}
+.chip.tog.on{background:var(--secondary-container);color:var(--on-secondary-container);border-color:transparent}
+.chip.tog:active{transform:scale(.94)}
+
+/* ---------- buttons ---------- */
+.btn{display:inline-flex;align-items:center;gap:8px;border:none;cursor:pointer;border-radius:999px;
+  padding:11px 22px;font-size:14px;font-weight:600;letter-spacing:.01em;
+  transition:transform .25s var(--emph),box-shadow .25s var(--emph),background-color .25s var(--emph),color .25s var(--emph)}
+.btn:active:not(:disabled){transform:scale(.955)}
+.btn:disabled{opacity:.38;cursor:not-allowed}
+.btn.filled{background:var(--primary);color:var(--on-primary);box-shadow:var(--shadow)}
+.btn.filled:hover:not(:disabled){background:#3d4bc2}
+.btn.tonal{background:var(--secondary-container);color:var(--on-secondary-container)}
+.btn.tonal:hover:not(:disabled){background:#d5d7f4}
+.btn.dangert{background:var(--error-container);color:var(--on-error-container)}
+.btn.dangert:hover:not(:disabled){background:#f3cfcc}
+.btn.armed{background:var(--error);color:var(--on-error)}
+.btn.text{background:transparent;color:var(--primary);padding:9px 14px}
+.btn.text:hover{background:var(--sc)}
+.btn.text.danger{color:var(--error)}
+.btn.text.danger:hover{background:var(--error-container)}
+.fab{display:inline-flex;align-items:center;gap:8px;border:none;cursor:pointer;border-radius:18px;
+  background:var(--primary-container);color:var(--on-primary-container);padding:9px 18px 9px 13px;
+  font-size:14px;font-weight:600;box-shadow:var(--shadow);
+  transition:transform .25s var(--emph),background-color .25s var(--emph)}
+.fab:hover{background:#d3d5ff}
+.fab:active{transform:scale(.95)}
+.fab svg{width:20px;height:20px}
+
+/* ---------- cards ---------- */
+.card{background:var(--sc-low);border-radius:28px;padding:22px;box-shadow:var(--shadow)}
+.card.plain{background:var(--sc-low)}
+.card h2{font-size:19px;font-weight:650;letter-spacing:-.01em}
+.lbl{font-size:12.5px;font-weight:600;color:var(--on-surface-var);letter-spacing:.03em}
+.display{font-size:44px;font-weight:700;letter-spacing:-.035em;line-height:1.02;margin-top:6px;
+  font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.display small{font-size:16px;font-weight:600;color:var(--on-surface-var);letter-spacing:0}
+.sub{font-size:12.5px;color:var(--on-surface-var);margin-top:8px;line-height:1.5}
 
 /* ---------- hero ---------- */
-.hero{display:grid;grid-template-columns:1fr auto;gap:10px 30px;align-items:end;
-  padding:26px 18px 20px;border-bottom:2px solid var(--line);position:relative}
-.micro{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--mut)}
-.micro b{color:var(--fg)}
-h1{font-family:var(--heavy);font-weight:900;font-size:clamp(2.3rem,5.6vw,4.4rem);
-  letter-spacing:-.035em;line-height:.92;text-transform:uppercase;margin:10px 0 8px;color:var(--fg)}
-h1.warn{color:var(--fg)}
-h1.crit{color:var(--red)}
-.herosub{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--mut)}
-.herosub .ok{color:var(--grn)}
-.herosub .bad{color:var(--red)}
-.hright{text-align:right}
-.hright .lbl{font-size:10px;letter-spacing:.18em;color:var(--mut);text-transform:uppercase;margin-bottom:2px}
-.tpsnum{font-family:var(--mono);font-weight:700;font-size:clamp(3rem,7vw,5rem);line-height:.9;
-  letter-spacing:-.04em;font-variant-numeric:tabular-nums}
-.tpsnum small{font-size:.32em;color:var(--mut);font-weight:400;letter-spacing:.06em}
-.tpsnum.crit{color:var(--red)}
-.hazard{display:none;height:8px;background:repeating-linear-gradient(-45deg,var(--red) 0 12px,#0a0a0a 12px 24px)}
-.hazard.on{display:block}
-.hazard.stripes-only{display:block;background:repeating-linear-gradient(-45deg,#1c1c1c 0 12px,#0a0a0a 12px 24px)}
+.hero{display:grid;grid-template-columns:1.25fr .9fr 1fr;gap:14px;margin-top:6px}
+.status-card .display{font-size:40px}
+.status-card.ok{background:var(--tertiary-container)}
+.status-card.ok .display,.status-card.ok .lbl{color:var(--on-tertiary-container)}
+.status-card.ok .sub{color:color-mix(in srgb,var(--on-tertiary-container) 78%,transparent)}
+.status-card.crit{background:var(--error-container)}
+.status-card.crit .display,.status-card.crit .lbl{color:var(--on-error-container)}
+.status-card.crit .sub{color:color-mix(in srgb,var(--on-error-container) 80%,transparent)}
+.status-card.warn{background:var(--warn-container)}
+.status-card.warn .display,.status-card.warn .lbl{color:var(--warn)}
+.status-card.warn .sub{color:color-mix(in srgb,var(--warn) 85%,transparent)}
+.tps-card{background:var(--primary-container)}
+.tps-card .lbl{color:var(--on-primary-container)}
+.tps-card .display{color:var(--on-primary-container)}
+.tps-card .display small{color:color-mix(in srgb,var(--on-primary-container) 70%,transparent)}
+.tps-card .sub{color:color-mix(in srgb,var(--on-primary-container) 72%,transparent)}
+.quick-card{display:flex;flex-direction:column;gap:9px;justify-content:center}
+.qrow{display:flex;justify-content:space-between;align-items:baseline;gap:10px;font-size:13px;color:var(--on-surface-var)}
+.qrow b{font-weight:650;color:var(--on-surface);font-variant-numeric:tabular-nums}
 
-/* ---------- metric grid ---------- */
-.gridlabel{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 18px 6px;font-size:10px;
-  letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
-.gridlabel b{color:var(--mut)}
-.grid{display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:var(--line);
-  border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.cell{background:var(--panel);padding:12px 14px 11px;min-height:118px;display:flex;flex-direction:column}
-.cell .lbl{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut)}
-.cell .lbl i{font-style:normal;color:var(--dim)}
-.cell .num{font-family:var(--mono);font-size:31px;font-weight:700;line-height:1;
-  font-variant-numeric:tabular-nums;margin-top:auto;color:var(--fg);transition:color .3s}
-.cell .num small{font-size:.36em;font-weight:400;color:var(--mut);letter-spacing:.04em}
-.cell[data-state="warn"] .num{color:var(--red);opacity:.62}
-.cell[data-state="crit"] .num{color:var(--red)}
-.cell.na .num{color:var(--dim);font-size:20px;letter-spacing:.06em}
-.meter{height:4px;background:#1b1b1b;margin-top:9px;position:relative}
-.meter>span{position:absolute;inset:0 auto 0 0;width:0%;background:#5e5e5e;transition:width .6s ease,background-color .3s}
-.meter>span.warn{background:var(--red);opacity:.55}
-.meter>span.crit{background:var(--red)}
-.cell .foot{font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-top:7px;min-height:12px;font-variant-numeric:tabular-nums}
+/* ---------- metrics ---------- */
+.mgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:14px;margin-top:14px}
+.mcard{display:flex;flex-direction:column;min-height:128px}
+.mval{font-size:30px;font-weight:700;letter-spacing:-.03em;margin-top:auto;padding-top:14px;
+  font-variant-numeric:tabular-nums;line-height:1;display:flex;align-items:baseline;gap:5px}
+.mval small{font-size:13px;font-weight:600;color:var(--on-surface-var)}
+.mval.na{color:var(--outline);font-size:19px;font-weight:600;letter-spacing:0}
+.mcard[data-state="warn"] .mval{color:var(--warn)}
+.mcard[data-state="crit"] .mval{color:var(--error)}
+.prog{height:8px;border-radius:99px;background:var(--sc-highest);margin-top:11px;overflow:hidden}
+.prog>span{display:block;height:100%;border-radius:99px;background:var(--primary);width:0%;
+  transition:width .6s var(--emph),background-color .3s var(--emph)}
+.prog>span.warn{background:#e8a020}
+.prog>span.crit{background:var(--error)}
+.mfoot{font-size:11.5px;color:var(--on-surface-var);margin-top:7px;min-height:15px;font-variant-numeric:tabular-nums}
+.mna .prog{visibility:hidden}
 
-/* ---------- strip ---------- */
-.strip{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--line);
-  border-bottom:1px solid var(--line)}
-.si{background:var(--panel);padding:9px 14px}
-.si .lbl{font-size:9px;letter-spacing:.16em;color:var(--dim);text-transform:uppercase;margin-bottom:3px}
-.si .lbl::before{content:"+ ";color:var(--line2)}
-.si .val{font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:.02em}
-.si .val.na{color:var(--dim);font-weight:400}
-
-/* ---------- ops console ---------- */
-.opsgrid{display:grid;grid-template-columns:1.1fr 1.1fr 1fr;gap:1px;background:var(--line);
-  border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-.ocell{background:var(--panel);padding:12px 14px;min-height:96px;display:flex;flex-direction:column}
-.ocell .lbl{font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--mut)}
-.ocell .lbl i{font-style:normal;color:var(--dim)}
-.obtns{display:flex;gap:10px;flex-wrap:wrap;margin-top:auto;padding-top:10px}
-.obtn{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
-  background:transparent;color:var(--fg);border:1px solid var(--line2);padding:8px 16px;cursor:pointer}
-.obtn:hover:not(:disabled){border-color:var(--fg);background:#161616}
-.obtn.danger{color:var(--red);border-color:rgba(255,42,42,.45)}
-.obtn.danger:hover:not(:disabled){border-color:var(--red);background:rgba(255,42,42,.08)}
-.obtn.armed{background:var(--red);color:#000;border-color:var(--red)}
-.obtn:disabled{opacity:.3;cursor:not-allowed}
-.ophase{font-family:var(--mono);font-size:19px;font-weight:700;letter-spacing:.04em;margin-top:auto;padding-top:8px}
-.ophase.live{color:var(--fg)}
-.ophase.live::after{content:"█";margin-left:8px;animation:blink 1s steps(2) infinite}
-.ophase.ok{color:var(--grn)}
-.ophase.bad{color:var(--red)}
-.omsg{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin-top:6px;min-height:14px;word-break:break-all}
-.omsg.err{color:var(--red)}
-.omsg.ok{color:var(--grn)}
-@keyframes blink{50%{opacity:0}}
-.finp{font-family:var(--mono);font-size:11px;background:var(--panel2);color:var(--fg);
-  border:1px solid var(--line2);padding:6px 10px;letter-spacing:.06em;width:170px}
-.finp:focus{outline:none;border-color:var(--fg)}
+/* ---------- ops ---------- */
+.opscard{margin-top:14px}
+.ophead{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.opsbtns{display:flex;gap:10px;flex-wrap:wrap}
+.opsrow{display:flex;align-items:center;gap:16px;margin-top:16px;flex-wrap:wrap}
+.phasewrap{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
+.phase{font-size:15px;font-weight:650;letter-spacing:.01em;white-space:nowrap}
+.phase.live::after{content:"";display:inline-block;width:9px;height:9px;border-radius:99px;background:var(--primary);
+  margin-left:9px;animation:pulse 1.1s var(--emph) infinite}
+.phase.ok{color:#1d7a2c}
+.phase.bad{color:var(--error)}
+@keyframes pulse{0%,100%{transform:scale(.7);opacity:.4}50%{transform:scale(1.15);opacity:1}}
+.omsg{font-size:12.5px;color:var(--on-surface-var);word-break:break-all}
+.omsg.err{color:var(--error)}
+.opprog{flex:0 0 220px;height:8px;border-radius:99px;background:var(--sc-highest);overflow:hidden;display:none}
+.opprog.live{display:block}
+.opprog>span{display:block;height:100%;width:36%;border-radius:99px;background:var(--primary);
+  animation:slide 1.4s var(--emph) infinite}
+@keyframes slide{0%{transform:translateX(-110%)}100%{transform:translateX(340%)}}
 
 /* ---------- mods ---------- */
-.dbanner{display:none;align-items:center;gap:14px;flex-wrap:wrap;margin:10px 18px 0;
-  border:1px solid rgba(255,42,42,.5);background:rgba(255,42,42,.06);color:var(--red);
-  font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;padding:8px 12px}
+.modscard{margin-top:14px}
+.modhead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.modtools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.field{background:var(--sc);border:1px solid transparent;border-radius:14px;padding:9px 14px;font-size:13.5px;
+  color:var(--on-surface);min-width:160px;transition:border-color .2s,background-color .2s}
+.field:focus{outline:none;border-color:var(--primary);background:var(--surface)}
+.field::placeholder{color:var(--outline)}
+.dbanner{display:none;align-items:center;gap:12px;flex-wrap:wrap;margin-top:14px;border-radius:18px;
+  background:var(--error-container);color:var(--on-error-container);padding:12px 16px;font-size:13.5px;font-weight:600}
 .dbanner.show{display:flex}
-.mwrap{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--line);
-  display:flex;flex-direction:column;max-height:340px;overflow-y:auto}
-.mrow{display:grid;grid-template-columns:minmax(0,1fr) 90px 120px 90px 170px;gap:1px;
-  background:var(--panel);align-items:center;padding:7px 14px;font-size:11.5px}
-.mrow.mhead{position:sticky;top:0;background:var(--panel2);font-size:9px;letter-spacing:.16em;
-  text-transform:uppercase;color:var(--dim);z-index:2}
-.mrow .mname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
-.mrow.off .mname{color:var(--dim);text-decoration:line-through}
-.mrow span{color:var(--mut);font-variant-numeric:tabular-nums;letter-spacing:.04em}
-.mrow .mst{font-weight:700}
-.mrow .mst.on{color:var(--grn)}
-.mrow .mst.off{color:var(--dim)}
-.mbtns{display:flex;gap:8px;justify-content:flex-end}
-.mbtn{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
-  background:transparent;color:var(--mut);border:1px solid var(--line2);padding:3px 9px;cursor:pointer}
-.mbtn:hover{color:var(--fg);border-color:var(--fg)}
-.mbtn.del:hover{color:var(--red);border-color:var(--red)}
-.mbtn.armed{background:var(--red);color:#000;border-color:var(--red)}
-.mempty{background:var(--panel);padding:16px 14px;font-size:10.5px;letter-spacing:.12em;color:var(--dim);text-transform:uppercase}
+.mlist{margin-top:14px;border-radius:20px;background:var(--surface);max-height:380px;overflow-y:auto}
+.mitem{display:grid;grid-template-columns:26px minmax(0,1fr) auto auto;gap:12px;align-items:center;
+  padding:11px 16px;border-bottom:1px solid var(--sc)}
+.mitem:last-child{border-bottom:none}
+.mitem .st{width:11px;height:11px;border-radius:99px;background:#1d7a2c}
+.mitem.off .st{background:var(--outline-var)}
+.mname{font-size:14px;font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mitem.off .mname{color:var(--on-surface-var);text-decoration:line-through}
+.mmeta{font-size:12px;color:var(--on-surface-var);font-variant-numeric:tabular-nums;white-space:nowrap}
+.mops{display:flex;gap:4px}
+.mempty{padding:22px 16px;font-size:13.5px;color:var(--on-surface-var)}
 
-/* ---------- log ---------- */
-.lsec{border-bottom:1px solid var(--line);display:flex;flex-direction:column}
-.lhead{display:flex;justify-content:space-between;padding:8px 18px;font-size:10px;
-  letter-spacing:.16em;text-transform:uppercase;color:var(--mut)}
-.lhead .l b{color:var(--fg)}
-.lhead .l::before{content:">>> ";color:var(--red)}
-pre#log{font-size:11px;line-height:1.62;color:#9c9c9c;background:var(--panel2);
-  padding:10px 16px;min-height:180px;max-height:320px;flex:1 1 auto;overflow:auto;white-space:pre-wrap;word-break:break-all;margin:0}
-pre#log .ts{color:var(--dim)}
-pre#log .er{color:var(--red)}
-pre#log .wn{color:var(--red);opacity:.55}
+/* ---------- log console ---------- */
+.logcard{margin-top:14px;background:var(--sc-low)}
+.loghead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.logtools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+select.field{min-width:150px;padding-right:30px;appearance:none;cursor:pointer;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2346464f' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center}
+.sw{display:inline-flex;align-items:center;gap:9px;font-size:13.5px;font-weight:600;cursor:pointer;user-select:none}
+.sw input{position:absolute;opacity:0;width:0;height:0}
+.sw .track{width:44px;height:26px;border-radius:99px;background:var(--sc-highest);border:2px solid var(--outline-var);
+  position:relative;transition:background-color .25s var(--emph),border-color .25s var(--emph)}
+.sw .thumb{position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:99px;background:var(--outline);
+  transition:all .25s var(--emph)}
+.sw input:checked+.track{background:var(--primary);border-color:var(--primary)}
+.sw input:checked+.track .thumb{left:21px;width:20px;height:20px;background:var(--on-primary);top:1px}
+.sw input:focus-visible+.track{outline:3px solid var(--primary);outline-offset:2px}
+.iconbtn{display:inline-grid;place-items:center;width:40px;height:40px;border-radius:14px;cursor:pointer;
+  color:var(--on-surface-var);border:none;background:transparent;transition:background-color .2s,color .2s;text-decoration:none}
+.iconbtn:hover{background:var(--sc-high);color:var(--on-surface)}
+.iconbtn svg{width:20px;height:20px}
+.term{margin-top:14px;background:var(--term-bg);color:var(--term-fg);border-radius:20px;
+  padding:16px 18px;height:380px;overflow-y:auto;font-family:"Cascadia Code","Cascadia Mono",Consolas,monospace;
+  font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all}
+.term::-webkit-scrollbar{width:10px}
+.term::-webkit-scrollbar-thumb{background:#33333e;border-radius:99px}
+.term .ts{color:var(--term-dim)}
+.term .w{color:var(--term-warn)}
+.term .e{color:var(--term-err)}
+.term .o{color:var(--term-ok)}
+.term .empty{color:var(--term-dim)}
+.logmeta{display:flex;align-items:center;gap:12px;margin-top:10px;font-size:12px;color:var(--on-surface-var);flex-wrap:wrap}
+#jumpNew{display:none;cursor:pointer}
+#jumpNew.show{display:inline-flex}
 
-/* ---------- footer ---------- */
-footer{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;padding:9px 18px;
-  font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
-footer b{color:var(--mut)}
-footer .c::before{content:"© ";color:var(--line2)}
-footer .r::before{content:"® ";color:var(--line2)}
+/* ---------- snackbar ---------- */
+#snackbar{position:fixed;left:50%;bottom:26px;transform:translate(-50%,140%);z-index:200;
+  background:var(--on-surface);color:var(--surface);border-radius:14px;padding:13px 20px;font-size:13.5px;
+  box-shadow:var(--shadow);max-width:min(640px,90vw);transition:transform .35s var(--emph)}
+#snackbar.show{transform:translate(-50%,0)}
+#snackbar.err{background:var(--error);color:var(--on-error)}
 
-@media (max-width:1150px){.grid{grid-template-columns:repeat(3,1fr)}.opsgrid{grid-template-columns:1fr}.strip{grid-template-columns:repeat(2,1fr)}}
-@media (max-width:900px){.mrow{grid-template-columns:minmax(0,1fr) 90px 150px}.mrow span:nth-child(2),.mrow span:nth-child(3){display:none}}
-@media (max-width:680px){.grid{grid-template-columns:repeat(2,1fr)}.hero{grid-template-columns:1fr}.hright{text-align:left}}
+footer{margin-top:26px;font-size:12px;color:var(--on-surface-var);display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap}
+
+@media (max-width:1150px){.mgrid{grid-template-columns:repeat(3,1fr)}.hero{grid-template-columns:1fr 1fr}.quick-card{grid-column:1/-1}}
+@media (max-width:700px){.mgrid{grid-template-columns:repeat(2,1fr)}.hero{grid-template-columns:1fr}.mitem{grid-template-columns:20px minmax(0,1fr) auto}.mmeta,.mitem .mops .mmeta{display:none}.mitem .mmeta{display:none}}
 </style>
 </head>
 <body>
-<div class="wrap">
-  <div class="bar">
-    <span><b>HWTAB</b> /// NODE TELEMETRY</span>
-    <span class="r">
-      <span>UNIT / D-01</span>
-      <span>REV 2.7.0</span>
-      <span>LAN / 192.168.1.0/24</span>
-      <span id="clock">--:--:--</span>
-    </span>
-  </div>
-
-  <section class="hero">
+<header class="appbar wrap" style="padding-bottom:14px">
+  <div class="brand">
+    <span class="logo" aria-hidden="true"><svg width="24" height="24" viewBox="0 0 32 32" fill="none"><path d="M8 21V11l5 5 3-6 3 6 5-5v10" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></span>
     <div>
-      <div class="micro">[ NODE: <b>ST-LAPTOP</b> ] MINECRAFT 1.21.1 /// NEOFORGE 21.1.234 /// SUPERFLAT</div>
-      <h1 id="heroState">LINKING</h1>
-      <div class="herosub" id="heroSub">ACQUIRING TELEMETRY FEED /// POLL 3S</div>
+      <h1>MC Node Console</h1>
+      <div class="sub">ST-LAPTOP · NeoForge 1.21.1 · superflat · :25565</div>
     </div>
-    <div class="hright">
-      <div class="lbl">[ TICK RATE ]</div>
-      <div class="tpsnum" id="tpsHero">--<small>/20 TPS</small></div>
-      <div class="micro" id="tpsFoot" style="margin-top:6px;color:var(--dim)">HWTAB MOD NOT LOADED</div>
-    </div>
+  </div>
+  <div class="abar-right">
+    <span class="chip" id="stateChip"><span class="dot"></span><span id="stateChipTxt">リンク中</span></span>
+    <span class="chip plain" id="clock">--:--:--</span>
+  </div>
+</header>
+
+<main class="wrap" id="main">
+  <section class="hero">
+    <article class="card status-card" id="statusCard">
+      <div class="lbl">サーバー状態</div>
+      <div class="display" id="heroState">接続中</div>
+      <div class="sub" id="heroSub">テレメトリ取得中…</div>
+    </article>
+    <article class="card tps-card">
+      <div class="lbl">Tick rate</div>
+      <div class="display" id="tpsHero">--<small>/20 TPS</small></div>
+      <div class="sub" id="tpsFoot">HwTab mod なし</div>
+    </article>
+    <article class="card quick-card">
+      <div class="qrow"><span>サーバー稼働</span><b id="mcUptime">--</b></div>
+      <div class="qrow"><span>システム稼働</span><b id="uptime">--</b></div>
+      <div class="qrow"><span>ディスク C: 空き</span><b id="disk">--</b></div>
+      <div class="qrow"><span>Mods 読込済</span><b id="stripMods">--</b></div>
+    </article>
   </section>
-  <div class="hazard stripes-only" id="hazard"></div>
 
-  <div class="gridlabel"><span>[ GRID A / CORE METRICS ]</span><b>POLL 3000MS /// CACHE 2000MS</b></div>
-  <div class="grid">
-    <div class="cell na" id="t-mspt">
-      <div class="lbl">MSPT <i>/ TICK</i></div>
-      <div class="num" id="mspt">n/a</div>
-      <div class="meter"><span id="msptBar"></span></div>
-      <div class="foot">LIMIT 50MS</div>
-    </div>
-    <div class="cell na" id="t-players">
-      <div class="lbl">SESSIONS <i>/ LIVE</i></div>
-      <div class="num" id="players">n/a</div>
-      <div class="meter" style="visibility:hidden"><span></span></div>
-      <div class="foot" id="playersFoot">NO DATA</div>
-    </div>
-    <div class="cell na" id="t-heap">
-      <div class="lbl">JVM HEAP</div>
-      <div class="num" id="heap">n/a</div>
-      <div class="meter"><span id="heapBar"></span></div>
-      <div class="foot" id="heapFoot">HWTAB NOT LOADED</div>
-    </div>
-    <div class="cell" id="t-cpu">
-      <div class="lbl">CPU <i>/ ALL CORES</i></div>
-      <div class="num" id="cpu">--<small>%</small></div>
-      <div class="meter"><span id="cpuBar"></span></div>
-      <div class="foot" id="cpuFoot">THRESHOLD 85%</div>
-    </div>
-    <div class="cell" id="t-ram">
-      <div class="lbl">SYSTEM MEM</div>
-      <div class="num" id="ram">--<small>GB</small></div>
-      <div class="meter"><span id="ramBar"></span></div>
-      <div class="foot" id="ramFoot">USED / TOTAL</div>
-    </div>
-    <div class="cell na" id="t-temp">
-      <div class="lbl">PKG TEMP</div>
-      <div class="num" id="temp">n/a</div>
-      <div class="meter" style="visibility:hidden"><span></span></div>
-      <div class="foot">SENSOR MASKED / VBS</div>
-    </div>
-  </div>
+  <section class="mgrid" aria-label="metrics">
+    <article class="card mcard mna" id="t-mspt"><div class="lbl">MSPT</div><div class="mval na" id="mspt">n/a</div><div class="prog"><span id="msptBar"></span></div><div class="mfoot">上限 50ms</div></article>
+    <article class="card mcard mna" id="t-players"><div class="lbl">Sessions</div><div class="mval na" id="players">n/a</div><div class="prog"><span style="width:0%"></span></div><div class="mfoot" id="playersFoot">データなし</div></article>
+    <article class="card mcard mna" id="t-heap"><div class="lbl">JVM Heap</div><div class="mval na" id="heap">n/a</div><div class="prog"><span id="heapBar"></span></div><div class="mfoot" id="heapFoot">HwTab なし</div></article>
+    <article class="card mcard" id="t-cpu"><div class="lbl">CPU</div><div class="mval" id="cpu">--<small>%</small></div><div class="prog"><span id="cpuBar"></span></div><div class="mfoot" id="cpuFoot">閾値 85%</div></article>
+    <article class="card mcard" id="t-ram"><div class="lbl">System memory</div><div class="mval" id="ram">--<small>GB</small></div><div class="prog"><span id="ramBar"></span></div><div class="mfoot" id="ramFoot">used / total</div></article>
+    <article class="card mcard mna" id="t-temp"><div class="lbl">Package temp</div><div class="mval na" id="temp">n/a</div><div class="prog"><span style="width:0%"></span></div><div class="mfoot">センサー遮断中 (VBS)</div></article>
+  </section>
 
-  <div class="strip">
-    <div class="si"><div class="lbl">SERVER STATE</div><div class="val" id="mcState">--</div></div>
-    <div class="si"><div class="lbl">SERVER UPTIME</div><div class="val" id="mcUptime">--</div></div>
-    <div class="si"><div class="lbl">SYSTEM UPTIME</div><div class="val" id="uptime">--</div></div>
-    <div class="si"><div class="lbl">DISK C: FREE</div><div class="val" id="disk">--</div></div>
-    <div class="si"><div class="lbl">MODS LOADED</div><div class="val" id="stripMods">--</div></div>
-  </div>
-
-  <div class="gridlabel"><span>[ OPS CONSOLE / POWER ]</span><b>ACTIONS RUN AS SYSTEM /// LAN ONLY</b></div>
-  <div class="opsgrid">
-    <div class="ocell">
-      <div class="lbl">POWER <i>/ TASK MCServer-7m</i></div>
-      <div class="obtns">
-        <button class="obtn danger" id="btnRestart">RESTART</button>
-        <button class="obtn danger" id="btnStop">STOP</button>
-        <button class="obtn" id="btnStart">START</button>
+  <section class="card opscard">
+    <div class="ophead">
+      <h2>電源操作</h2>
+      <div class="opsbtns">
+        <button class="btn dangert" id="btnRestart">再起動</button>
+        <button class="btn dangert" id="btnStop">停止</button>
+        <button class="btn filled" id="btnStart">起動</button>
       </div>
     </div>
-    <div class="ocell">
-      <div class="lbl">ACTION STATUS</div>
-      <div class="ophase" id="opsPhase">IDLE</div>
-      <div class="omsg" id="opsMsg">NO ACTIVE OPERATION</div>
+    <div class="opsrow">
+      <div class="opprog" id="opProg"><span></span></div>
+      <div class="phasewrap">
+        <span class="phase" id="opsPhase">アイドル</span>
+        <span class="omsg" id="opsMsg">実行中の操作はありません</span>
+      </div>
     </div>
-    <div class="ocell">
-      <div class="lbl">BRIEFING</div>
-      <div class="omsg">RESTART CYCLE ~2MIN /// STOP IS CLEAN (TASK /END) /// MOD CHANGES APPLY ON NEXT BOOT</div>
-    </div>
-  </div>
+  </section>
 
-  <div class="gridlabel">
-    <span>[ MOD ROSTER /// <b id="modCount">--</b> ]</span>
-    <span class="rmod" style="display:flex;gap:8px;align-items:center">
-      <input class="finp" id="modFilter" placeholder="FILTER" autocomplete="off">
-      <button class="obtn" id="btnRescan">RESCAN</button>
-      <button class="obtn" id="btnUpload">UPLOAD .JAR</button>
-      <input type="file" id="modFile" accept=".jar" multiple style="display:none">
-    </span>
-  </div>
-  <div class="dbanner" id="dirtyBanner">MODS CHANGED /// RESTART REQUIRED TO APPLY
-    <button class="obtn danger" id="btnDirtyRestart">RESTART NOW</button>
-  </div>
-  <div class="mwrap" id="mwrap">
-    <div class="mrow mhead"><span>NAME</span><span>SIZE</span><span>MODIFIED</span><span>STATE</span><span style="text-align:right">OPS</span></div>
-    <div id="modsBody"><div class="mempty">SCANNING…</div></div>
-  </div>
-
-  <div class="lsec">
-    <div class="lhead">
-      <span class="l">LOG STREAM /// <b>logs/latest.log</b></span>
-      <span>TAIL 15 /// NO AUTOSCROLL /// POLL 3S</span>
+  <section class="card modscard">
+    <div class="modhead">
+      <h2>Mods <span class="chip plain" id="modCount">--</span></h2>
+      <div class="modtools">
+        <input class="field" id="modFilter" placeholder="フィルタ" autocomplete="off">
+        <button class="btn text" id="btnRescan">再スキャン</button>
+        <button class="fab" id="btnUpload"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5m-6 6 6-6 6 6"/></svg>UPLOAD .JAR</button>
+        <input type="file" id="modFile" accept=".jar" multiple style="display:none">
+      </div>
     </div>
-    <pre id="log">ACQUIRING…</pre>
-  </div>
+    <div class="dbanner" id="dirtyBanner">mods フォルダに変更があります — 適用には再起動が必要です
+      <button class="btn dangert" id="btnDirtyRestart" style="padding:8px 16px;font-size:13px">今すぐ再起動</button>
+    </div>
+    <div class="mlist" id="modsBody"><div class="mempty">スキャン中…</div></div>
+  </section>
+
+  <section class="card logcard">
+    <div class="loghead">
+      <h2>コンソールログ</h2>
+      <div class="logtools">
+        <select class="field" id="logSel" aria-label="ログファイル"></select>
+        <input class="field" id="logSearch" placeholder="検索" autocomplete="off" style="min-width:130px">
+        <button class="chip tog on" data-lv="INFO">INFO</button>
+        <button class="chip tog on" data-lv="WARN">WARN</button>
+        <button class="chip tog on" data-lv="ERROR">ERROR</button>
+        <label class="sw"><input type="checkbox" id="logLive" checked><span class="track"><span class="thumb"></span></span>ライブ</label>
+        <a class="iconbtn" id="logDl" title="ログをダウンロード" download><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m-5-5 5 5 5-5M4 21h16"/></svg></a>
+      </div>
+    </div>
+    <pre class="term" id="term"><span class="empty">接続中…</span></pre>
+    <div class="logmeta">
+      <span id="logMeta">--</span>
+      <button class="chip tog" id="jumpNew">新着行あり — 追従する</button>
+    </div>
+  </section>
 
   <footer>
-    <span class="c">HWTAB CONSOLE UNIT/D-01</span>
-    <span>HTTP :8787 /// NO CDN /// ZERO DEPENDENCY</span>
-    <span class="r">BUILT FOR ST-LAPTOP /// 192.168.1.14</span>
+    <span>MC Node Console · unit D-01 · rev 3.0.0</span>
+    <span>HTTP :8787 · zero dependency · LAN only</span>
+    <span>built for ST-LAPTOP · 192.168.1.14</span>
   </footer>
-</div>
+</main>
+<div id="snackbar" role="status"></div>
 
 <script>
 const $ = id => document.getElementById(id);
@@ -313,57 +355,64 @@ const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;
 const escAttr = s => esc(s).replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 const fmt = (v,d) => (v===null||v===undefined||isNaN(v)) ? null : Number(v).toFixed(d===undefined?1:d);
 const setMeter = (el,pct,cls) => { el.style.width = Math.max(0,Math.min(100,pct||0))+'%'; el.className = cls||''; };
-const okTile = id => { $(id).classList.remove('na'); };
-const naTile = id => { $(id).classList.add('na'); $(id).dataset.state=''; };
+const okTile = id => { const t=$(id); t.classList.remove('mna','na'); };
+const naTile = id => { const t=$(id); t.classList.add('mna'); t.dataset.state=''; };
 const stTile = (id,st) => { $(id).dataset.state = (st&&st!=='ok')?st:''; };
 const stateOf = (v,warn,crit) => { if(v===null||v===undefined||isNaN(v))return null; return v>=crit?'crit':(v>=warn?'warn':'ok'); };
 setInterval(()=>{ $('clock').textContent = new Date().toLocaleTimeString('ja-JP',{hour12:false}); },1000);
 
+let snackTimer=null;
+function toast(msg, err){
+  const el=$('snackbar');
+  el.textContent=msg;
+  el.className=err?'err show':'show';
+  clearTimeout(snackTimer);
+  snackTimer=setTimeout(()=>{ el.className=''; },4200);
+}
+
+/* ---------- helpers ---------- */
 const BUSY = ['initiating','stopping','starting','waiting'];
 let actionBusy = false;
 let serverRunning = false;
 
-function renderLog(lines){
-  if(!lines||!lines.length){ $('log').textContent = 'NO DATA'; return; }
-  $('log').innerHTML = lines.map(l=>{
+function renderLog(lines, el){
+  if(!lines||!lines.length){ el.innerHTML='<span class="empty">ログなし</span>'; return; }
+  el.innerHTML = lines.map(l=>{
     const e = esc(l);
-    const m = e.match(/^(\[[^\]]*\]\s*)/);
-    const ts = m?('<span class="ts">'+m[1]+'</span>'):'';
+    const m = e.match(/^(\[[^\]]*\/(INFO|WARN|ERROR|FATAL)\]\s*)/);
+    const head = m?('<span class="ts">'+m[1]+'</span>'):'';
     const body = m?e.slice(m[1].length):e;
-    let cl='';
-    if(/ERROR|FATAL|Exception/.test(body)) cl=' class="er"';
-    else if(/WARN/.test(body)) cl=' class="wn"';
-    return ts+'<span'+cl+'>'+body+'</span>';
+    if(/ERROR|FATAL|Exception/.test(body)) return head+'<span class="e">'+body+'</span>';
+    if(/WARN/.test(body)) return head+'<span class="w">'+body+'</span>';
+    return head+body;
   }).join('\n');
 }
 
-function opsNote(text, cls){
-  const el = $('opsMsg');
-  el.textContent = text;
-  el.className = 'omsg' + (cls?(' '+cls):'');
-}
-
-/* ---------- ops actions ---------- */
+/* ---------- power ---------- */
 const armTimers = {};
 function armButton(btn, fn){
-  const id = btn.id;
-  if(btn.classList.contains('armed')){ btn.classList.remove('armed'); btn.textContent = btn.dataset.label; clearTimeout(armTimers[id]); fn(); return; }
+  if(btn.classList.contains('armed')){ btn.classList.remove('armed'); btn.textContent = btn.dataset.label; clearTimeout(armTimers[btn.id]); fn(); return; }
   btn.dataset.label = btn.textContent;
-  btn.classList.add('armed'); btn.textContent = 'CONFIRM?';
-  armTimers[id] = setTimeout(()=>{ btn.classList.remove('armed'); btn.textContent = btn.dataset.label; }, 3500);
+  btn.classList.add('armed'); btn.textContent = '本当に実行？';
+  armTimers[btn.id] = setTimeout(()=>{ btn.classList.remove('armed'); btn.textContent = btn.dataset.label; }, 3500);
 }
-async function doAction(mode, silent){
+async function doAction(mode){
   try{
     const r = await fetch('/api/action/'+mode, {method:'POST'});
     const d = await r.json();
-    if(d.ok){ opsNote(mode.toUpperCase()+' DISPATCHED /// MONITORING…','ok'); }
-    else { opsNote('REJECTED: '+(d.err||'BUSY'),'err'); if(silent) alert('REJECTED: '+(d.err||'BUSY')); }
-  }catch(e){ opsNote('ACTION REQUEST FAILED','err'); }
+    if(d.ok){ opsMsg(mode==='restart'?'再起動を指示しました — 監視中…':(mode==='stop'?'停止を指示しました — 監視中…':'起動を指示しました — 監視中…'), ''); }
+    else toast('拒否されました: '+(d.err||'理由不明'), true);
+  }catch(e){ toast('操作リクエストに失敗しました', true); }
 }
 $('btnRestart').addEventListener('click', function(){ armButton(this, ()=>doAction('restart')); });
 $('btnStop').addEventListener('click', function(){ armButton(this, ()=>doAction('stop')); });
 $('btnStart').addEventListener('click', ()=>doAction('start'));
 $('btnDirtyRestart').addEventListener('click', ()=>doAction('restart'));
+function opsMsg(text, cls){
+  const el=$('opsMsg');
+  el.textContent=text;
+  el.className='omsg'+(cls?' '+cls:'');
+}
 
 /* ---------- mods ---------- */
 let MODS = [];
@@ -373,67 +422,151 @@ async function loadMods(){
     if(!r.ok) throw new Error('http '+r.status);
     const d = await r.json();
     MODS = d.mods||[];
-    $('modCount').textContent = (d.active||0)+' ON / '+(d.disabled||0)+' OFF'+(d.dirty?' /// DIRTY':'');
+    $('modCount').textContent = (d.active||0)+' ON / '+(d.disabled||0)+' OFF';
+    $('dirtyBanner').className = 'dbanner' + (d.dirty?' show':'');
     renderMods();
-  }catch(e){ $('modsBody').innerHTML = '<div class="mempty">MOD INVENTORY UNREACHABLE</div>'; }
+  }catch(e){ $('modsBody').innerHTML = '<div class="mempty">mod 一覧を取得できませんでした</div>'; }
 }
 function renderMods(){
   const q = ($('modFilter').value||'').toLowerCase();
   const rows = MODS.filter(m=>m.name.toLowerCase().includes(q));
-  if(!rows.length){ $('modsBody').innerHTML = '<div class="mempty">NO MATCH</div>'; return; }
+  if(!rows.length){ $('modsBody').innerHTML = '<div class="mempty">該当なし</div>'; return; }
   $('modsBody').innerHTML = rows.map(m=>{
     const dt = new Date(m.mtime*1000);
     const p2 = n => String(n).padStart(2,'0');
-    const mm = p2(dt.getMonth()+1)+'-'+p2(dt.getDate())+' '+p2(dt.getHours())+':'+p2(dt.getMinutes());
-    return '<div class="mrow'+(m.enabled?'':' off')+'">'
+    const mm = dt.getFullYear()+'/'+p2(dt.getMonth()+1)+'/'+p2(dt.getDate())+' '+p2(dt.getHours())+':'+p2(dt.getMinutes());
+    return '<div class="mitem'+(m.enabled?'':' off')+'">'
+      +'<span class="st" aria-hidden="true"></span>'
       +'<span class="mname" title="'+escAttr(m.name)+'">'+esc(m.name)+'</span>'
-      +'<span>'+m.sizeKB+'KB</span>'
-      +'<span>'+mm+'</span>'
-      +'<span class="mst '+(m.enabled?'on':'off')+'">'+(m.enabled?'ON':'OFF')+'</span>'
-      +'<span class="mbtns">'
-      +'<button class="mbtn" data-a="toggle" data-n="'+escAttr(m.name)+'">'+(m.enabled?'DISABLE':'ENABLE')+'</button>'
-      +'<button class="mbtn del" data-a="delete" data-n="'+escAttr(m.name)+'">DEL</button>'
+      +'<span class="mmeta">'+m.sizeKB+'KB · '+mm+' · '+(m.enabled?'ON':'OFF')+'</span>'
+      +'<span class="mops">'
+      +'<button class="btn text" data-a="toggle" data-n="'+escAttr(m.name)+'" style="font-size:13px">'+(m.enabled?'無効化':'有効化')+'</button>'
+      +'<button class="btn text danger" data-a="delete" data-n="'+escAttr(m.name)+'" style="font-size:13px">削除</button>'
       +'</span></div>';
   }).join('');
 }
 $('modFilter').addEventListener('input', renderMods);
 $('btnRescan').addEventListener('click', loadMods);
 $('modsBody').addEventListener('click', async ev=>{
-  const b = ev.target.closest('button.mbtn');
+  const b = ev.target.closest('button[data-a]');
   if(!b) return;
   const name = b.getAttribute('data-n'), act = b.getAttribute('data-a');
   if(act==='delete'){
-    if(!b.classList.contains('armed')){ b.dataset.label=b.textContent; b.classList.add('armed'); b.textContent='SURE?';
+    if(!b.classList.contains('armed')){ b.dataset.label=b.textContent; b.classList.add('armed'); b.textContent='本当に?';
       setTimeout(()=>{ b.classList.remove('armed'); b.textContent=b.dataset.label; },3000); return; }
   }
   b.disabled = true;
   try{
     const r = await fetch('/api/mods/'+act, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:name})});
     const d = await r.json().catch(()=>({ok:false,err:'HTTP '+r.status}));
-    if(!d.ok) opsNote('MOD OP FAILED: '+(d.err||'?'),'err'); else opsNote('MOD '+(act==='toggle'?'TOGGLED':'DELETED')+': '+name,'ok');
-  }catch(e){ opsNote('REQUEST FAILED: '+e,'err'); }
+    if(!d.ok) toast('mod 操作失敗: '+(d.err||'?'), true); else toast('mod '+(act==='toggle'?(MODS.find(x=>x.name===name)?.enabled?'無効化':'有効化'):'削除')+'しました: '+name, false);
+  }catch(e){ toast('リクエスト失敗: '+e, true); }
   loadMods();
 });
 $('btnUpload').addEventListener('click', ()=>$('modFile').click());
 $('modFile').addEventListener('change', ()=>uploadFiles([...$('modFile').files]));
-const mwrap = $('mwrap');
-mwrap.addEventListener('dragover', e=>{ e.preventDefault(); });
-mwrap.addEventListener('drop', e=>{ e.preventDefault(); uploadFiles([...e.dataTransfer.files]); });
+const mlist = $('modsBody');
+mlist.addEventListener('dragover', e=>{ e.preventDefault(); });
+mlist.addEventListener('drop', e=>{ e.preventDefault(); uploadFiles([...e.dataTransfer.files]); });
 async function uploadFiles(files){
   const jars = files.filter(f=>/\.jar$/i.test(f.name));
-  if(!jars.length){ opsNote('UPLOAD SKIPPED /// .JAR ONLY','err'); return; }
+  if(!jars.length){ toast('アップロード中止 — .jar のみ対応', true); return; }
   let okN = 0, failN = 0;
   for(const f of jars){
-    opsNote('UPLOADING '+f.name+' ('+Math.round(f.size/1024)+'KB)…');
+    toast('アップロード中: '+f.name+' ('+Math.round(f.size/1024)+'KB)');
     try{
       const r = await fetch('/api/mods/upload?name='+encodeURIComponent(f.name), {method:'POST',body:f});
       const d = await r.json();
-      if(d.ok) okN++; else { failN++; opsNote('UPLOAD FAILED: '+f.name+' /// '+(d.err||'?'),'err'); }
-    }catch(e){ failN++; opsNote('UPLOAD FAILED: '+f.name,'err'); }
+      if(d.ok) okN++; else { failN++; toast('アップロード失敗: '+f.name+' — '+(d.err||'?'), true); }
+    }catch(e){ failN++; toast('アップロード失敗: '+f.name, true); }
   }
-  if(okN) opsNote('UPLOAD COMPLETE /// '+okN+' OK'+(failN?(' / '+failN+' FAIL'):''),'ok');
+  if(okN) toast('アップロード完了: '+okN+'件'+(failN?(' / 失敗'+failN+'件'):''), false);
   loadMods();
 }
+
+/* ---------- log console ---------- */
+let logFile='latest.log', logOffset=0, logAuto=true, logNew=0;
+let logBuf=[];
+const lvOn = {INFO:true, WARN:true, ERROR:true};
+async function loadLogList(){
+  try{
+    const r = await fetch('/api/logs',{cache:'no-store'});
+    const d = await r.json();
+    const sel = $('logSel');
+    const cur = logFile;
+    sel.innerHTML = (d.logs||[]).map(f=>'<option value="'+escAttr(f.name)+'">'+esc(f.name)+' ('+f.sizeKB+'KB)</option>').join('');
+    if((d.logs||[]).some(f=>f.name===cur)){ sel.value = cur; }
+  }catch(e){}
+}
+$('logSel').addEventListener('change', ()=>{ logFile = $('logSel').value || 'latest.log'; logOffset = 0; logBuf=[]; $('logDl').href='/api/log/download?file='+encodeURIComponent(logFile); pullLog(true); });
+$('logSearch').addEventListener('input', renderTerm);
+document.querySelectorAll('.chip.tog[data-lv]').forEach(c=>{
+  c.addEventListener('click', ()=>{
+    const lv = c.getAttribute('data-lv');
+    lvOn[lv] = !lvOn[lv];
+    c.classList.toggle('on', lvOn[lv]);
+    renderTerm();
+  });
+});
+$('logLive').addEventListener('change', ()=>{
+  logAuto = $('logLive').checked;
+  if(logAuto){ logNew=0; $('jumpNew').classList.remove('show'); renderTerm(); scrollTerm(); }
+});
+$('jumpNew').addEventListener('click', ()=>{ $('logLive').checked = true; logAuto = true; logNew = 0; $('jumpNew').classList.remove('show'); renderTerm(); scrollTerm(); });
+function levelOf(line){
+  const m = line.match(/\/(INFO|WARN|ERROR|FATAL)\]/);
+  if(!m) return 'INFO';
+  return m[1]==='FATAL' ? 'ERROR' : m[1];
+}
+function visibleLines(){
+  const q = ($('logSearch').value||'').toLowerCase();
+  return logBuf.filter(l=>{
+    const lv = levelOf(l);
+    if(lv==='WARN' && !lvOn.WARN) return false;
+    if(lv==='ERROR' && !lvOn.ERROR) return false;
+    if(lv==='INFO' && !lvOn.INFO) return false;
+    if(q && !l.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+function renderTerm(){
+  const el = $('term');
+  const lines = visibleLines();
+  if(!lines.length){ el.innerHTML='<span class="empty">(表示行なし — フィルタ/検索を確認)</span>'; return; }
+  renderLog(lines, el);
+}
+function scrollTerm(){
+  const el = $('term');
+  el.scrollTop = el.scrollHeight;
+}
+async function pullLog(force){
+  try{
+    const url = '/api/log?file='+encodeURIComponent(logFile)+(logOffset>0 ? ('&offset='+logOffset) : '&lines=600');
+    const r = await fetch(url, {cache:'no-store'});
+    if(!r.ok) throw new Error('http '+r.status);
+    const d = await r.json();
+    if(d.offset < logOffset){ logOffset = 0; return pullLog(true); }
+    if(!logOffset || force || d.reset){
+      logBuf = d.lines||[];
+    } else if((d.lines||[]).length){
+      logBuf = logBuf.concat(d.lines);
+      if(logBuf.length > 2400){ logBuf = logBuf.slice(logBuf.length-2400); }
+    }
+    logOffset = d.offset;
+    if(!logAuto && (d.lines||[]).length){
+      logNew += d.lines.length;
+      const jb = $('jumpNew');
+      jb.textContent = '新着 '+logNew+' 行 — 追従する';
+      jb.classList.add('show');
+    }
+    if(logAuto){ renderTerm(); scrollTerm(); }
+    $('logMeta').textContent = logFile+' · '+(d.size===undefined?'--':Math.round(d.size/1024)+'KB')+(d.truncated?' · 末尾表示':'');
+  }catch(e){
+    $('logMeta').textContent = 'ログ取得失敗 — リトライ中…';
+  }
+}
+$('logDl').href = '/api/log/download?file=latest.log';
+loadLogList();
 
 /* ---------- tick ---------- */
 async function tick(){
@@ -443,9 +576,9 @@ async function tick(){
     if(!r.ok) throw new Error('http '+r.status);
     s = await r.json();
   }catch(e){
-    $('heroState').textContent='NO LINK'; $('heroState').className='crit';
-    $('heroSub').innerHTML='TELEMETRY FEED LOST /// <span class="bad">RETRYING</span>';
-    $('hazard').className='hazard on';
+    $('heroState').textContent='接続なし'; $('statusCard').className='card status-card crit';
+    $('heroSub').innerHTML='テレメトリ喪失 — 再試行中…';
+    $('stateChip').className='chip bad'; $('stateChipTxt').textContent='OFFLINE';
     return;
   }
   const n=s.node||{}, mc=s.mc||{};
@@ -453,17 +586,17 @@ async function tick(){
   let worst = serverRunning ? 'ok' : 'crit';
 
   const cpu=n.cpu;
-  if(cpu===null||cpu===undefined){ $('cpu').innerHTML='n/a'; $('cpuFoot').textContent='NO DATA'; naTile('t-cpu'); setMeter($('cpuBar'),0,''); }
+  if(cpu===null||cpu===undefined){ $('cpu').innerHTML='n/a'; $('cpuFoot').textContent='データなし'; naTile('t-cpu'); setMeter($('cpuBar'),0,''); }
   else{
     okTile('t-cpu');
     const st=stateOf(cpu,85,95)||'ok';
     if(st==='crit')worst='crit'; else if(st==='warn'&&worst==='ok')worst='warn';
     $('cpu').innerHTML=fmt(cpu,0)+'<small>%</small>';
-    $('cpuFoot').textContent='LOAD '+fmt(cpu,0)+'% / TH 85%';
+    $('cpuFoot').textContent='負荷 '+fmt(cpu,0)+'% / 閾値 85%';
     stTile('t-cpu',st); setMeter($('cpuBar'),cpu,st);
   }
 
-  if(n.ramUsed===null||n.ramUsed===undefined||!n.ramTotal){ $('ram').innerHTML='n/a'; $('ramFoot').textContent='NO DATA'; naTile('t-ram'); setMeter($('ramBar'),0,''); }
+  if(n.ramUsed===null||n.ramUsed===undefined||!n.ramTotal){ $('ram').innerHTML='n/a'; $('ramFoot').textContent='データなし'; naTile('t-ram'); setMeter($('ramBar'),0,''); }
   else{
     okTile('t-ram');
     const p=n.ramUsed/n.ramTotal*100, st=stateOf(p,90,97)||'ok';
@@ -473,7 +606,7 @@ async function tick(){
     stTile('t-ram',st); setMeter($('ramBar'),p,st);
   }
 
-  if(mc.heapUsed===null||mc.heapUsed===undefined||!mc.heapMax){ $('heap').innerHTML='n/a'; $('heapFoot').textContent='HWTAB NOT LOADED'; naTile('t-heap'); setMeter($('heapBar'),0,''); }
+  if(mc.heapUsed===null||mc.heapUsed===undefined||!mc.heapMax){ $('heap').innerHTML='n/a'; $('heapFoot').textContent='HwTab なし'; naTile('t-heap'); setMeter($('heapBar'),0,''); }
   else{
     okTile('t-heap');
     const p=mc.heapUsed/mc.heapMax*100, st=stateOf(p,85,95)||'ok';
@@ -493,76 +626,80 @@ async function tick(){
     stTile('t-mspt',st); setMeter($('msptBar'),Math.min(100,ms/50*100),st);
   }
 
-  if(mc.players===null||mc.players===undefined){ $('players').innerHTML='n/a'; $('playersFoot').textContent='NO DATA'; naTile('t-players'); }
-  else{ okTile('t-players'); $('players').innerHTML=mc.players+'<small>USR</small>'; $('playersFoot').textContent=mc.players>0?'SESSIONS ACTIVE':'IDLE'; }
+  if(mc.players===null||mc.players===undefined){ $('players').innerHTML='n/a'; $('playersFoot').textContent='データなし'; naTile('t-players'); }
+  else{ okTile('t-players'); $('players').innerHTML=mc.players+'<small>人</small>'; $('playersFoot').textContent=mc.players>0?'プレイ中':'待機中'; }
 
   if(n.tempC===null||n.tempC===undefined){ $('temp').innerHTML='n/a'; naTile('t-temp'); }
   else{ okTile('t-temp'); $('temp').innerHTML=fmt(n.tempC,0)+'<small>°C</small>'; }
 
   const tps=mc.tps;
-  if(tps===null||tps===undefined){ $('tpsHero').innerHTML='--<small>/20 TPS</small>'; $('tpsFoot').textContent='HWTAB MOD NOT LOADED'; }
+  if(tps===null||tps===undefined){ $('tpsHero').innerHTML='--<small>/20 TPS</small>'; $('tpsFoot').textContent='HwTab mod なし'; }
   else{
     const st=tps<10?'crit':(tps<15?'warn':'ok');
     if(st==='crit')worst='crit'; else if(st==='warn'&&worst==='ok')worst='warn';
     $('tpsHero').innerHTML=fmt(tps)+'<small>/20 TPS</small>';
-    $('tpsHero').className='tpsnum'+(st==='crit'?' crit':'');
-    $('tpsFoot').textContent=tps>=19.9?'FULL RATE':'DEGRADED TICK';
+    $('tpsFoot').textContent=tps>=19.9?'フルレート':'tick 低下';
   }
 
   const up = serverRunning;
-  $('mcState').textContent = up?'RUNNING':'DOWN';
-  $('mcState').className = 'val'+(up?'':' na');
-  if(!up) worst='crit';
   $('mcUptime').textContent = mc.uptimeText||'n/a';
   $('uptime').textContent = n.uptimeText||'n/a';
   $('disk').textContent = (n.diskFreeGB===null||n.diskFreeGB===undefined)?'n/a':fmt(n.diskFreeGB)+' GB';
   $('stripMods').textContent = (s.modsActive===undefined)?'--':(s.modsActive+' / '+(s.modsDisabled||0)+' OFF');
 
-  renderLog(s.logTail);
-
   /* action state */
   const a = s.action;
   actionBusy = !!(a && BUSY.indexOf(a.phase)>=0);
-  const ph = $('opsPhase');
+  const ph = $('opsPhase'), prog=$('opProg');
   if(a){
-    ph.textContent = a.phase.toUpperCase();
-    ph.className = 'ophase ' + (actionBusy?'live':(a.phase==='done'?'ok':'bad'));
-    if(!actionBusy && $('opsMsg').textContent.indexOf('DISPATCHED')>=0) opsNote(a.msg||('PHASE: '+a.phase), a.phase==='failed'?'err':'ok');
+    const pmap = {initiating:'指示済み',stopping:'停止中…',starting:'起動中…',waiting:'起動待ち…',done:'完了',failed:'失敗'};
+    ph.textContent = pmap[a.phase]||a.phase;
+    ph.className = 'phase' + (actionBusy?' live':(a.phase==='done'?' ok':(a.phase==='failed'?' bad':'')));
+    prog.className = 'opprog' + (actionBusy?' live':'');
+    if(actionBusy){ opsMsg(a.msg||a.phase, ''); }
+    else if($('opsMsg').textContent.indexOf('監視中')>=0 || $('opsMsg').textContent.indexOf('指示しました')>=0){
+      opsMsg(a.msg||'', a.phase==='failed'?'err':'');
+      if(a.phase==='done') toast('操作が完了しました', false);
+      if(a.phase==='failed') toast('操作が失敗しました: '+(a.msg||''), true);
+    }
   } else {
-    ph.textContent = 'IDLE'; ph.className = 'ophase';
-    if($('opsMsg').textContent.indexOf('DISPATCHED')>=0) opsNote('NO ACTIVE OPERATION');
+    ph.textContent='アイドル'; ph.className='phase'; prog.className='opprog';
+    if($('opsMsg').textContent.indexOf('監視中')>=0 || $('opsMsg').textContent.indexOf('指示しました')>=0){ opsMsg('実行中の操作はありません',''); }
   }
   $('btnRestart').disabled = actionBusy;
   $('btnStop').disabled = actionBusy || !up;
   $('btnStart').disabled = actionBusy || up;
 
-  /* hero */
-  const hero=$('heroState');
+  /* hero + chip */
+  const hero=$('heroState'), sc=$('statusCard'), chip=$('stateChip'), chipT=$('stateChipTxt');
   const stTxt = up ? 'RUNNING' : 'DOWN';
-  const stCls = up ? 'ok' : 'bad';
   if(actionBusy){
-    const map = {initiating:'ACTION QUEUED',stopping:'STOPPING',starting:'BOOTING',waiting:'BOOTING'};
-    hero.textContent = map[a.phase]||'RESTARTING'; hero.className='warn';
-    $('hazard').className='hazard on';
-    $('heroSub').innerHTML = 'MANAGED OPERATION /// '+esc(a.msg||a.phase);
+    const map = {initiating:'操作を予約',stopping:'停止中',starting:'起動中',waiting:'起動中'};
+    hero.textContent = map[a.phase]||'操作中';
+    sc.className='card status-card warn';
+    $('heroSub').textContent = '管理操作を実行中 — '+(a.msg||a.phase);
+    chip.className='chip warn'; chipT.textContent='OPERATING';
   } else if(worst==='crit'){
-    hero.textContent='CRITICAL'; hero.className='crit'; $('hazard').className='hazard on';
-    $('heroSub').innerHTML = 'SERVER THREAD /// PORT 25565 /// <span class="'+stCls+'">STATE: '+stTxt+'</span> /// THRESHOLD EVENT';
+    hero.textContent='要対応'; sc.className='card status-card crit';
+    $('heroSub').textContent = (up?'しきい値超過':'サーバー停止')+' — ポート 25565';
+    chip.className='chip bad'; chipT.textContent=stTxt;
   } else if(worst==='warn'){
-    hero.textContent='DEGRADED'; hero.className='warn'; $('hazard').className='hazard on';
-    $('heroSub').innerHTML = 'SERVER THREAD /// PORT 25565 /// <span class="'+stCls+'">STATE: '+stTxt+'</span> /// THRESHOLD EVENT';
+    hero.textContent='注意'; sc.className='card status-card warn';
+    $('heroSub').textContent = 'しきい値イベント — 状態 '+stTxt;
+    chip.className='chip warn'; chipT.textContent=stTxt;
   } else {
-    hero.textContent='OPERATIONAL'; hero.className=''; $('hazard').className='hazard stripes-only';
-    $('heroSub').innerHTML = 'SERVER THREAD /// PORT 25565 /// <span class="ok">STATE: RUNNING</span> /// POLL 3S';
+    hero.textContent='正常稼働'; sc.className='card status-card ok';
+    $('heroSub').textContent = 'server thread · port 25565 · 3秒ごと更新';
+    chip.className='chip ok'; chipT.textContent=stTxt;
   }
 
-  /* dirty banner */
   $('dirtyBanner').className = 'dbanner' + (s.modsDirty?' show':'');
 }
 tick();
 setInterval(tick,3000);
 loadMods();
 setInterval(loadMods,20000);
+setInterval(()=>pullLog(false),2000);
 </script>
 </body>
 </html>
@@ -658,6 +795,13 @@ function Get-SafeModName([string]$raw) {
     return $null
 }
 
+function Get-SafeLogName([string]$raw) {
+    if ([string]::IsNullOrWhiteSpace($raw)) { return 'latest.log' }
+    $name = [System.IO.Path]::GetFileName($raw.Trim())
+    if ($name -match '^[A-Za-z0-9._\-]+\.log$') { return $name }
+    return $null
+}
+
 function Get-ActionState {
     try {
         if (-not (Test-Path $actionStateFile)) { return $null }
@@ -697,6 +841,82 @@ function Get-ModsJson {
     return '{"active":' + $active + ',"disabled":' + $disabled + ',"dirty":' + $(if ($dirty) { 'true' } else { 'false' }) + ',"mods":[' + ($arr -join ',') + ']}'
 }
 
+function Get-LogListJson {
+    $arr = New-Object System.Collections.Generic.List[string]
+    try {
+        $files = @(Get-ChildItem $logDir -Filter '*.log' -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
+        foreach ($f in $files) {
+            $epoch = [int][DateTimeOffset]::new($f.LastWriteTime.Ticks, [TimeSpan]::Zero).ToUnixTimeSeconds()
+            $arr.Add('{"name":"' + (Esc-Json $f.Name) + '","sizeKB":' + [math]::Round($f.Length / 1KB, 0) + ',"mtime":' + $epoch + '}')
+        }
+    } catch { }
+    return '{"logs":[' + ($arr -join ',') + ']}'
+}
+
+function Get-LogBodyJson($ctx) {
+    $file = Get-SafeLogName (Get-QParam $ctx 'file')
+    if (-not $file) { return @{ status = 400; json = '{"ok":false,"err":"INVALID FILE NAME"}' } }
+    $p = Join-Path $logDir $file
+    if (-not (Test-Path -LiteralPath $p)) { return @{ status = 404; json = '{"ok":false,"err":"FILE NOT FOUND"}' } }
+    $fi = Get-Item -LiteralPath $p
+    $offStr = Get-QParam $ctx 'offset'
+    $linesStr = Get-QParam $ctx 'lines'
+    $wantLines = 600
+    if ($linesStr -match '^\d+$') { $wantLines = [Math]::Min(2000, [Math]::Max(50, [int]$linesStr)) }
+
+    $linesArr = @()
+    $newOffset = $fi.Length
+    $offStrGiven = (($null -ne $offStr) -and $offStr -match '^\d+$')
+    $reset = -not $offStrGiven
+
+    if ($offStrGiven) {
+        $off = [long]$offStr
+        if ($off -gt $fi.Length) { $off = 0; $reset = $true }
+        if ($off -eq $fi.Length) {
+            return @{ status = 200; json = '{"ok":true,"file":"' + (Esc-Json $file) + '","offset":' + $off + ',"size":' + $fi.Length + ',"reset":false,"truncated":false,"lines":[]}' }
+        }
+        if (($fi.Length - $off) -gt 8MB) {
+            $reset = $true
+        } else {
+            $fs = New-Object System.IO.FileStream($p, 'Open', 'Read', 'ReadWrite')
+            try {
+                $fs.Seek($off, 'Begin') | Out-Null
+                $len = [int]($fi.Length - $off)
+                $buf = New-Object byte[] $len
+                $read = 0
+                while ($read -lt $len) {
+                    $n = $fs.Read($buf, $read, $len - $read)
+                    if ($n -le 0) { break }
+                    $read += $n
+                }
+                $newOffset = $off
+                if ($read -gt 0) {
+                    $cutEnd = $read
+                    if ($buf[$read - 1] -ne [byte]10) {
+                        $lastNl = -1
+                        for ($i = $read - 1; $i -ge 0; $i--) { if ($buf[$i] -eq [byte]10) { $lastNl = $i; break } }
+                        if ($lastNl -lt 0) { $cutEnd = 0 } else { $cutEnd = $lastNl + 1 }
+                    }
+                    if ($cutEnd -gt 0) {
+                        $txt = [System.Text.Encoding]::UTF8.GetString($buf, 0, $cutEnd)
+                        $linesArr = @($txt -split "`n" | ForEach-Object { $_.TrimEnd("`r") })
+                        if ($linesArr.Count -gt 0 -and $linesArr[$linesArr.Count - 1] -eq '') { $linesArr = $linesArr[0..($linesArr.Count - 2)] }
+                        $newOffset = $off + $cutEnd
+                    }
+                }
+            } finally { $fs.Dispose() }
+        }
+    }
+
+    if ($reset) {
+        $linesArr = @(Get-Content -LiteralPath $p -Tail $wantLines -Encoding UTF8 -ErrorAction SilentlyContinue)
+        $newOffset = $fi.Length
+    }
+
+    $linesJson = ($linesArr | ForEach-Object { '"' + (Esc-Json $_) + '"' }) -join ','
+    return @{ status = 200; json = '{"ok":true,"file":"' + (Esc-Json $file) + '","offset":' + $newOffset + ',"size":' + $fi.Length + ',"reset":' + $(if ($reset) { 'true' } else { 'false' }) + ',"truncated":' + $(if ($reset) { 'true' } else { 'false' }) + ',"lines":[' + $linesJson + ']}' }
+}
+
 function Get-Snapshot {
     $hw = Read-KeyValueFile $hwFile
     $sv = Read-KeyValueFile $statsFile
@@ -708,7 +928,6 @@ function Get-Snapshot {
         if ($parts.Count -eq 2) { try { $ramU = [double]$parts[0]; $ramT = [double]$parts[1] } catch { } }
     }
     if ($hw.ContainsKey('temp')) { try { $tempC = [double]$hw['temp'] } catch { } }
-    # uptime from the System process start time - pure native, no WMI
     $upText = $null
     try {
         $sysProc = Get-Process -Id 4 -ErrorAction Stop
@@ -807,6 +1026,34 @@ while ($true) {
                     Send-Json $ctx 200 (Get-SnapshotCached)
                 } elseif ($method -eq 'GET' -and $path -eq '/api/mods') {
                     Send-Json $ctx 200 (Get-ModsJson)
+                } elseif ($method -eq 'GET' -and $path -eq '/api/logs') {
+                    Send-Json $ctx 200 (Get-LogListJson)
+                } elseif ($method -eq 'GET' -and $path -eq '/api/log') {
+                    $lr = Get-LogBodyJson $ctx
+                    Send-Json $ctx $lr.status $lr.json
+                } elseif ($method -eq 'GET' -and $path -eq '/api/log/download') {
+                    $file = Get-SafeLogName (Get-QParam $ctx 'file')
+                    if (-not $file) {
+                        Send-Json $ctx 400 '{"ok":false,"err":"INVALID FILE NAME"}'
+                    } else {
+                        $p = Join-Path $logDir $file
+                        if (-not (Test-Path -LiteralPath $p)) {
+                            Send-Json $ctx 404 '{"ok":false,"err":"FILE NOT FOUND"}'
+                        } elseif ((Get-Item -LiteralPath $p).Length -gt 128MB) {
+                            Send-Json $ctx 413 '{"ok":false,"err":"TOO LARGE (128MB MAX)"}'
+                        } else {
+                            try {
+                                $bytes = [System.IO.File]::ReadAllBytes($p)
+                                $res.StatusCode = 200
+                                $res.ContentType = 'application/octet-stream'
+                                $res.Headers.Add('Content-Disposition', 'attachment; filename="' + $file + '"')
+                                $res.ContentLength64 = $bytes.Length
+                                $res.OutputStream.Write($bytes, 0, $bytes.Length)
+                            } catch {
+                                Send-Json $ctx 500 '{"ok":false,"err":"READ FAILED"}'
+                            }
+                        }
+                    }
                 } elseif ($method -eq 'POST' -and $path -match '^/api/action/(restart|stop|start)$') {
                     $mode = $Matches[1]
                     $act = Get-ActionState
